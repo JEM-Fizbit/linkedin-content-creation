@@ -38,11 +38,11 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST /api/sessions - Create new session
+// POST /api/sessions - Create new session (optionally as a remix)
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { original_idea } = body
+    const { original_idea, remix_of_session_id } = body
 
     if (!original_idea || typeof original_idea !== 'string') {
       return NextResponse.json(
@@ -51,16 +51,32 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // If this is a remix, verify the source session exists
+    let sourceSession: Session | undefined
+    if (remix_of_session_id) {
+      const sourceStmt = db.prepare('SELECT * FROM sessions WHERE id = ?')
+      sourceSession = sourceStmt.get(remix_of_session_id) as Session | undefined
+
+      if (!sourceSession) {
+        return NextResponse.json(
+          { error: 'Source session not found' },
+          { status: 404 }
+        )
+      }
+    }
+
     const id = generateId()
-    const title = generateTitle(original_idea)
+    const title = remix_of_session_id
+      ? `Remix: ${generateTitle(original_idea)}`
+      : generateTitle(original_idea)
     const now = new Date().toISOString()
 
     const stmt = db.prepare(`
-      INSERT INTO sessions (id, title, original_idea, status, created_at, updated_at)
-      VALUES (?, ?, ?, 'in_progress', ?, ?)
+      INSERT INTO sessions (id, title, original_idea, status, created_at, updated_at, remix_of_session_id)
+      VALUES (?, ?, ?, 'in_progress', ?, ?, ?)
     `)
 
-    stmt.run(id, title, original_idea, now, now)
+    stmt.run(id, title, original_idea, now, now, remix_of_session_id || null)
 
     const newSession: Session = {
       id,
@@ -70,7 +86,7 @@ export async function POST(request: NextRequest) {
       created_at: now,
       updated_at: now,
       published_at: null,
-      remix_of_session_id: null,
+      remix_of_session_id: remix_of_session_id || null,
     }
 
     return NextResponse.json(newSession, { status: 201 })

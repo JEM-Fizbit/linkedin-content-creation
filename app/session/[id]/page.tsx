@@ -874,6 +874,31 @@ ${cta}`
     <div className="flex h-screen overflow-hidden">
       <Sidebar sessions={allSessions} onRefresh={fetchAllSessions} />
       <main className="flex-1 flex flex-col overflow-hidden">
+        {/* Breadcrumbs */}
+        <nav className="px-4 py-2 bg-gray-50 dark:bg-gray-900/50 border-b border-gray-200 dark:border-gray-800">
+          <ol className="flex items-center gap-2 text-sm">
+            <li>
+              <button
+                onClick={() => router.push('/')}
+                className="text-light-text-secondary dark:text-dark-text-secondary hover:text-linkedin transition-colors flex items-center gap-1"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6" />
+                </svg>
+                Home
+              </button>
+            </li>
+            <li className="text-light-text-secondary dark:text-dark-text-secondary">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </li>
+            <li className="text-light-text-primary dark:text-dark-text-primary font-medium truncate max-w-xs">
+              {session.title}
+            </li>
+          </ol>
+        </nav>
+
         {/* Header */}
         <div className="border-b border-gray-200 dark:border-gray-800 p-4">
           <div className="flex items-center justify-between">
