@@ -1,0 +1,483 @@
+<project_specification>
+  <project_name>LI-Creator</project_name>
+
+  <overview>
+    A local Next.js application that uses the Claude Agent SDK to help LinkedIn creators transform rough post ideas into polished, engagement-optimized content. Through an interactive, conversational workflow, the app generates hooks, body content, CTAs, and visual concepts while allowing users to refine, edit, save favorites, track performance, and remix successful posts.
+  </overview>
+
+  <technology_stack>
+    <frontend>
+      <framework>Next.js (App Router)</framework>
+      <language>TypeScript</language>
+      <styling>Tailwind CSS</styling>
+      <state_management>React Context</state_management>
+      <theming>Dark/Light mode support</theming>
+    </frontend>
+    <backend>
+      <runtime>Node.js</runtime>
+      <framework>Next.js API Routes</framework>
+      <database>SQLite</database>
+      <ai_engine>Claude Agent SDK (TypeScript V2 Preview)</ai_engine>
+    </backend>
+    <communication>
+      <api>REST API via Next.js API Routes</api>
+      <realtime>Server-sent events for streaming responses</realtime>
+    </communication>
+  </technology_stack>
+
+  <prerequisites>
+    <environment_setup>
+      - Node.js 18+ installed
+      - Claude running continuously in a separate terminal window
+      - Claude Agent SDK configured for local authentication
+    </environment_setup>
+    <reference_documentation>
+      - Engineering Guide: https://www.anthropic.com/engineering/building-agents-with-the-claude-agent-sdk
+      - SDK Overview: https://platform.claude.com/docs/en/agent-sdk/overview
+      - TypeScript SDK: https://platform.claude.com/docs/en/agent-sdk/typescript
+      - TypeScript V2 (Preview): https://platform.claude.com/docs/en/agent-sdk/typescript-v2-preview
+    </reference_documentation>
+  </prerequisites>
+
+  <feature_count>98</feature_count>
+
+  <security_and_access_control>
+    <user_roles>
+      <role name="local_user">
+        <permissions>
+          - Full access to all features (local-only app)
+          - Create, read, update, delete sessions
+          - Manage favorites and templates
+          - Export content
+          - Track performance notes
+        </permissions>
+        <protected_routes>
+          - None (local app, no authentication required initially)
+        </protected_routes>
+      </role>
+    </user_roles>
+    <authentication>
+      <method>None (local-first app for single user)</method>
+      <session_timeout>None</session_timeout>
+      <future_expansion>Authentication can be added later for multi-user support</future_expansion>
+    </authentication>
+    <sensitive_operations>
+      - Delete confirmation dialog for sessions
+      - Delete confirmation for favorites
+    </sensitive_operations>
+  </security_and_access_control>
+
+  <core_features>
+    <dashboard_and_navigation>
+      - Landing/welcome screen explaining the app's purpose for LinkedIn content creation
+      - Connection status indicator showing Claude SDK connectivity
+      - Dashboard displaying recent sessions with search/filter capability
+      - Session cards showing original idea, status (in progress/complete/published), and date
+      - "New Idea" button prominently displayed
+      - Dark/light mode toggle in navigation
+      - Clean, minimal empty states when no sessions exist
+      - Sidebar navigation with session list
+    </dashboard_and_navigation>
+
+    <ideation_chat_interface>
+      - Initial idea text input area (prominent, welcoming)
+      - Scrollable chat timeline displaying conversation history
+      - User messages displayed distinctly from Claude responses
+      - Claude adopts LinkedIn strategist/copywriter persona
+      - Loading/thinking states with visual feedback during AI processing
+      - Auto-retry on Claude disconnect (3 attempts with exponential backoff)
+      - "Reconnecting..." indicator during retry attempts
+      - Manual retry button with troubleshooting tips on complete failure
+      - Ability to continue conversation after structured output generation
+      - Request regeneration of individual sections without starting over
+      - "Finalize" action to mark session as complete
+    </ideation_chat_interface>
+
+    <structured_output_display>
+      - Distinct output container (adjacent to or below chat)
+      - Hooks section displaying 3 engaging hook options
+      - Body content section with draft post (150-300 words)
+      - CTAs section displaying 3 call-to-action variations
+      - Visual concepts section with text description AND preview mockup
+      - Inline editing for all generated content sections
+      - Version history showing "Original from Claude" vs "Your edits"
+      - Revert to original functionality
+      - Copy to clipboard button for each section and individual items
+      - Live character/word count with LinkedIn optimal range indicator
+      - Visual indicator when content is in ideal length range vs. too long
+    </structured_output_display>
+
+    <export_functionality>
+      - Copy to clipboard formatted for LinkedIn (ready to paste)
+      - Export as Markdown file for drafts
+      - Export as PDF for carousel/document posts (each slide as a page)
+      - Export visual concepts as PNG images
+    </export_functionality>
+
+    <favorites_and_templates>
+      - Save individual items (hooks, CTAs, body snippets) to Favorites library
+      - Save entire content plans as reusable templates
+      - Browse Favorites library with search/filter
+      - Use favorites as inspiration when starting new sessions
+      - Delete and manage favorites
+      - Indicate which session a favorite came from
+    </favorites_and_templates>
+
+    <session_management>
+      - Automatic session saving
+      - Session status tracking (in progress / complete / published)
+      - View and browse past sessions
+      - Reopen and continue any session
+      - Mark session as "Published"
+      - Add performance notes after publishing (views, likes, comments, reposts)
+      - Browse published posts sorted by engagement metrics
+      - "Remix" button on completed sessions to create fresh angles
+      - Linked sessions showing remix relationships to originals
+    </session_management>
+
+    <claude_sdk_integration>
+      - Environment configuration for local Claude instance connection
+      - System prompt defining LinkedIn strategist persona
+      - Conversation context management (full history sent with each message)
+      - Structured output parsing for hooks/body/CTAs/visuals
+      - Graceful error handling for SDK communication
+      - Reconnection logic with exponential backoff
+      - Connection status monitoring
+    </claude_sdk_integration>
+
+    <ui_ux_polish>
+      - Responsive layout (desktop-first, functional on tablet)
+      - Dark and light theme with smooth toggle transition
+      - Clean typography optimized for readability
+      - Loading animations and skeleton states
+      - Comprehensive error states with helpful messages
+      - Success feedback (copy confirmed, save confirmed, etc.)
+      - Smooth transitions between views
+      - Minimal, professional aesthetic
+    </ui_ux_polish>
+  </core_features>
+
+  <database_schema>
+    <tables>
+      <sessions>
+        - id (TEXT PRIMARY KEY, UUID)
+        - title (TEXT, derived from initial idea)
+        - original_idea (TEXT, the user's initial input)
+        - status (TEXT: 'in_progress' | 'complete' | 'published')
+        - created_at (DATETIME)
+        - updated_at (DATETIME)
+        - published_at (DATETIME, nullable)
+        - remix_of_session_id (TEXT, nullable, FK to sessions.id)
+      </sessions>
+
+      <messages>
+        - id (TEXT PRIMARY KEY, UUID)
+        - session_id (TEXT, FK to sessions.id)
+        - role (TEXT: 'user' | 'assistant')
+        - content (TEXT)
+        - created_at (DATETIME)
+      </messages>
+
+      <outputs>
+        - id (TEXT PRIMARY KEY, UUID)
+        - session_id (TEXT, FK to sessions.id, UNIQUE)
+        - hooks (JSON, array of 3 hook strings)
+        - hooks_original (JSON, original from Claude)
+        - body_content (TEXT)
+        - body_content_original (TEXT)
+        - ctas (JSON, array of 3 CTA strings)
+        - ctas_original (JSON, original from Claude)
+        - visual_concepts (JSON, array of concept objects with description and preview data)
+        - visual_concepts_original (JSON)
+        - created_at (DATETIME)
+        - updated_at (DATETIME)
+      </outputs>
+
+      <favorites>
+        - id (TEXT PRIMARY KEY, UUID)
+        - type (TEXT: 'hook' | 'cta' | 'body' | 'visual' | 'template')
+        - content (TEXT or JSON depending on type)
+        - source_session_id (TEXT, nullable, FK to sessions.id)
+        - created_at (DATETIME)
+      </favorites>
+
+      <performance_notes>
+        - id (TEXT PRIMARY KEY, UUID)
+        - session_id (TEXT, FK to sessions.id, UNIQUE)
+        - views (INTEGER, nullable)
+        - likes (INTEGER, nullable)
+        - comments (INTEGER, nullable)
+        - reposts (INTEGER, nullable)
+        - notes (TEXT, free-form notes)
+        - recorded_at (DATETIME)
+      </performance_notes>
+    </tables>
+  </database_schema>
+
+  <api_endpoints_summary>
+    <sessions>
+      - GET /api/sessions - List all sessions (with filters: status, search)
+      - POST /api/sessions - Create new session
+      - GET /api/sessions/:id - Get session details with messages and output
+      - PATCH /api/sessions/:id - Update session (status, title)
+      - DELETE /api/sessions/:id - Delete session and related data
+      - POST /api/sessions/:id/remix - Create remix from existing session
+    </sessions>
+
+    <chat>
+      - POST /api/chat - Send message to Claude, receive response (streaming)
+      - POST /api/chat/regenerate - Regenerate specific section (hooks/body/ctas/visuals)
+    </chat>
+
+    <outputs>
+      - GET /api/outputs/:sessionId - Get generated output for session
+      - PATCH /api/outputs/:sessionId - Update edited content
+      - POST /api/outputs/:sessionId/revert - Revert section to original
+    </outputs>
+
+    <favorites>
+      - GET /api/favorites - List all favorites (with filter by type)
+      - POST /api/favorites - Save new favorite
+      - DELETE /api/favorites/:id - Remove favorite
+    </favorites>
+
+    <performance>
+      - GET /api/performance/:sessionId - Get performance notes
+      - POST /api/performance/:sessionId - Create/update performance notes
+      - GET /api/performance/stats - Get aggregate stats across published posts
+    </performance>
+
+    <export>
+      - POST /api/export/markdown - Export session as markdown
+      - POST /api/export/pdf - Export session as PDF (carousel format)
+      - POST /api/export/png - Export visual concept as PNG
+      - POST /api/export/clipboard - Get clipboard-ready formatted content
+    </export>
+
+    <connection>
+      - GET /api/connection/status - Check Claude SDK connection status
+      - POST /api/connection/retry - Manually retry connection
+    </connection>
+  </api_endpoints_summary>
+
+  <ui_layout>
+    <main_structure>
+      - Fixed sidebar on left (collapsible) containing:
+        - App logo/title
+        - "New Idea" button
+        - Session list (recent first, searchable)
+        - Favorites link
+        - Settings/theme toggle
+      - Main content area with:
+        - Header showing current session title and status
+        - Split view: Chat panel (left/top) + Output panel (right/bottom)
+        - Or tabbed view on smaller screens
+    </main_structure>
+
+    <page_views>
+      - Dashboard/Home: Welcome message + recent sessions grid
+      - Session View: Chat + structured output
+      - Favorites Library: Grid/list of saved items
+      - Published Posts: List with performance metrics
+    </page_views>
+
+    <responsive_behavior>
+      - Desktop (1024px+): Full sidebar + split main content
+      - Tablet (768px-1023px): Collapsible sidebar + tabbed main content
+      - Mobile: Single column, bottom navigation (functional but not primary target)
+    </responsive_behavior>
+  </ui_layout>
+
+  <design_system>
+    <color_palette>
+      <light_mode>
+        - Background: white (#FFFFFF) and light gray (#F9FAFB)
+        - Text: dark gray (#111827) and medium gray (#6B7280)
+        - Primary accent: LinkedIn blue (#0A66C2)
+        - Success: green (#10B981)
+        - Warning: amber (#F59E0B)
+        - Error: red (#EF4444)
+      </light_mode>
+      <dark_mode>
+        - Background: dark (#111827) and darker (#0F172A)
+        - Text: white (#F9FAFB) and light gray (#9CA3AF)
+        - Primary accent: LinkedIn blue (#0A66C2)
+        - Success/Warning/Error: Same as light mode
+      </dark_mode>
+    </color_palette>
+
+    <typography>
+      - Font family: Inter (or system font stack)
+      - Headings: Semi-bold, clear hierarchy
+      - Body text: Regular weight, good line height for readability
+      - Code/monospace: For character counts, technical info
+    </typography>
+
+    <spacing>
+      - Consistent 4px base unit (Tailwind defaults)
+      - Generous whitespace for clean, minimal aesthetic
+      - Clear visual separation between sections
+    </spacing>
+  </design_system>
+
+  <implementation_steps>
+    <step number="1">
+      <title>Project Setup and Claude SDK Integration</title>
+      <tasks>
+        - Initialize Next.js project with TypeScript and Tailwind
+        - Configure Claude Agent SDK connection
+        - Create connection status endpoint and component
+        - Set up SQLite database with schema
+        - Create base API route structure
+      </tasks>
+    </step>
+
+    <step number="2">
+      <title>Core Chat Functionality</title>
+      <tasks>
+        - Build chat interface component
+        - Implement message sending/receiving with Claude
+        - Create system prompt for LinkedIn strategist persona
+        - Handle streaming responses
+        - Implement auto-retry logic
+        - Add loading and error states
+      </tasks>
+    </step>
+
+    <step number="3">
+      <title>Structured Output Generation</title>
+      <tasks>
+        - Parse Claude responses into structured format (hooks, body, CTAs, visuals)
+        - Build output display components
+        - Implement copy-to-clipboard functionality
+        - Add character/word count with indicators
+        - Create visual concept preview mockups
+      </tasks>
+    </step>
+
+    <step number="4">
+      <title>Session Management</title>
+      <tasks>
+        - Build dashboard and session list
+        - Implement session CRUD operations
+        - Add session status workflow
+        - Create search and filter functionality
+        - Build session detail view
+      </tasks>
+    </step>
+
+    <step number="5">
+      <title>Editing and Version History</title>
+      <tasks>
+        - Enable inline editing of generated content
+        - Store original versions
+        - Implement revert functionality
+        - Add visual diff between original and edited
+      </tasks>
+    </step>
+
+    <step number="6">
+      <title>Favorites and Templates</title>
+      <tasks>
+        - Build favorites library view
+        - Implement save-to-favorites functionality
+        - Create template saving/loading
+        - Add favorites browser during new session creation
+      </tasks>
+    </step>
+
+    <step number="7">
+      <title>Export Functionality</title>
+      <tasks>
+        - Implement clipboard export with LinkedIn formatting
+        - Generate markdown export
+        - Create PDF export for carousels
+        - Build PNG export for visual concepts
+      </tasks>
+    </step>
+
+    <step number="8">
+      <title>Performance Tracking</title>
+      <tasks>
+        - Add "Mark as Published" workflow
+        - Build performance notes form
+        - Create published posts view with metrics
+        - Implement sorting by engagement
+      </tasks>
+    </step>
+
+    <step number="9">
+      <title>Remix Feature</title>
+      <tasks>
+        - Implement remix creation from existing sessions
+        - Link remixed sessions to originals
+        - Show remix relationships in UI
+        - Pass context to Claude for remix conversations
+      </tasks>
+    </step>
+
+    <step number="10">
+      <title>UI Polish and Theming</title>
+      <tasks>
+        - Implement dark/light mode toggle
+        - Add animations and transitions
+        - Polish responsive layouts
+        - Ensure empty states are clean and helpful
+        - Final accessibility pass
+      </tasks>
+    </step>
+  </implementation_steps>
+
+  <success_criteria>
+    <functionality>
+      - User can enter a post idea and have a conversation with Claude to refine it
+      - Claude generates structured output (hooks, body, CTAs, visual concepts)
+      - User can edit generated content inline with version history
+      - Sessions are saved and can be resumed
+      - Favorites can be saved and browsed
+      - Content can be exported in multiple formats (clipboard, markdown, PDF, PNG)
+      - Performance can be tracked for published posts
+      - Old posts can be remixed into new content
+    </functionality>
+
+    <user_experience>
+      - App feels responsive and snappy
+      - Clear feedback for all actions (loading, success, error)
+      - Intuitive navigation between sessions and features
+      - Dark mode is fully functional and visually consistent
+      - Empty states guide the user on what to do
+    </user_experience>
+
+    <technical_quality>
+      - Claude SDK connection is reliable with proper error handling
+      - Data persists correctly in SQLite
+      - No console errors during normal operation
+      - API responses are fast (<1s for non-AI operations)
+      - Code is well-organized and maintainable
+    </technical_quality>
+
+    <design_polish>
+      - Clean, minimal aesthetic throughout
+      - Consistent spacing and typography
+      - Professional look appropriate for a productivity tool
+      - LinkedIn blue accent used appropriately
+      - Good contrast and readability in both themes
+    </design_polish>
+  </success_criteria>
+
+  <claude_persona>
+    <system_prompt_guidance>
+      Claude should act as an expert LinkedIn content strategist and copywriter with deep knowledge of:
+      - LinkedIn algorithm and best practices for engagement
+      - Hook writing that stops the scroll
+      - Storytelling techniques for professional content
+      - CTA strategies that drive meaningful actions
+      - Visual content that complements text posts
+      - Personal branding for professionals
+
+      Tone: Professional yet approachable, insightful, focused on practical results.
+
+      Behavior: Ask clarifying questions about target audience, desired tone, and key takeaway before generating structured output. Be a collaborative partner, not just a content generator.
+    </system_prompt_guidance>
+  </claude_persona>
+</project_specification>

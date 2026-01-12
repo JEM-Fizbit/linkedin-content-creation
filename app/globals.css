@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Base styles */
+@layer base {
+  html {
+    @apply scroll-smooth;
+  }
+
+  body {
+    @apply bg-light-bg-primary text-light-text-primary antialiased;
+    @apply dark:bg-dark-bg-primary dark:text-dark-text-primary;
+  }
+
+  /* Focus ring styling for accessibility */
+  *:focus-visible {
+    @apply outline-none ring-2 ring-linkedin ring-offset-2;
+    @apply dark:ring-offset-dark-bg-primary;
+  }
+}
+
+/* Custom scrollbar styling */
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    @apply bg-light-bg-secondary dark:bg-dark-bg-secondary;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply bg-light-text-secondary/30 dark:bg-dark-text-secondary/30 rounded-full;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    @apply bg-light-text-secondary/50 dark:bg-dark-text-secondary/50;
+  }
+}
+
+/* Component styles */
+@layer components {
+  /* Button variants */
+  .btn {
+    @apply inline-flex items-center justify-center px-4 py-2 rounded-lg font-medium transition-all duration-200;
+    @apply focus-visible:ring-2 focus-visible:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-primary {
+    @apply btn bg-linkedin text-white hover:bg-linkedin-dark;
+    @apply dark:hover:bg-linkedin-light;
+  }
+
+  .btn-secondary {
+    @apply btn bg-light-bg-secondary text-light-text-primary border border-gray-200;
+    @apply hover:bg-gray-100 dark:bg-dark-bg-secondary dark:text-dark-text-primary;
+    @apply dark:border-gray-700 dark:hover:bg-gray-800;
+  }
+
+  .btn-ghost {
+    @apply btn text-light-text-secondary hover:bg-light-bg-secondary;
+    @apply dark:text-dark-text-secondary dark:hover:bg-dark-bg-secondary;
+  }
+
+  .btn-danger {
+    @apply btn bg-error text-white hover:bg-red-600;
+  }
+
+  /* Card styling */
+  .card {
+    @apply bg-white rounded-xl border border-gray-200 shadow-sm;
+    @apply dark:bg-dark-bg-secondary dark:border-gray-800;
+  }
+
+  /* Input styling */
+  .input {
+    @apply w-full px-3 py-2 rounded-lg border border-gray-200 bg-white;
+    @apply text-light-text-primary placeholder:text-light-text-secondary/60;
+    @apply focus:border-linkedin focus:ring-1 focus:ring-linkedin;
+    @apply dark:bg-dark-bg-secondary dark:border-gray-700 dark:text-dark-text-primary;
+    @apply dark:placeholder:text-dark-text-secondary/60;
+  }
+
+  .textarea {
+    @apply input resize-none;
+  }
+
+  /* Badge styling */
+  .badge {
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .badge-success {
+    @apply badge bg-success/10 text-success;
+  }
+
+  .badge-warning {
+    @apply badge bg-warning/10 text-warning;
+  }
+
+  .badge-error {
+    @apply badge bg-error/10 text-error;
+  }
+
+  .badge-info {
+    @apply badge bg-linkedin/10 text-linkedin;
+  }
+}
+
+/* Animation utilities */
+@layer utilities {
+  .animate-in {
+    animation: fadeIn 0.2s ease-in-out;
+  }
+}
