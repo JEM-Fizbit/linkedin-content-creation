@@ -8,6 +8,9 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata: Metadata = {
   title: 'LI-Creator - LinkedIn Content Creation',
   description: 'Transform your ideas into polished, engagement-optimized LinkedIn content with AI-powered assistance.',
+  icons: {
+    icon: '/favicon.svg',
+  },
 }
 
 export default function RootLayout({
