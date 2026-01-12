@@ -771,6 +771,51 @@ Please help me create a fresh take on this topic with a new angle or perspective
     }
   }
 
+  const handleExportPNG = async (conceptIndex: number) => {
+    if (!session || !output) return
+
+    setIsExporting(true)
+    setError(null)
+
+    try {
+      const response = await fetch('/api/export/png', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session_id: sessionId,
+          concept_index: conceptIndex
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to export PNG')
+      }
+
+      // Get the filename from the Content-Disposition header
+      const contentDisposition = response.headers.get('Content-Disposition')
+      let filename = `${session.title}-concept-${conceptIndex + 1}.png`
+      if (contentDisposition) {
+        const match = contentDisposition.match(/filename="([^"]+)"/)
+        if (match) filename = match[1]
+      }
+
+      // Create blob and trigger download
+      const blob = await response.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to export PNG')
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
   const handleCopyForLinkedIn = async () => {
     if (!output) return
 
@@ -1918,26 +1963,42 @@ ${cta}`
                           <span className="text-xs font-medium text-linkedin bg-linkedin/10 px-2 py-1 rounded">
                             Concept {index + 1}
                           </span>
-                          <button
-                            onClick={() => handleCopyHook(concept.description, index + 100)}
-                            className={cn(
-                              'p-1 rounded transition-colors',
-                              copySuccess === `hook-${index + 100}`
-                                ? 'text-success bg-success/10'
-                                : 'text-light-text-secondary dark:text-dark-text-secondary hover:text-linkedin hover:bg-linkedin/10'
-                            )}
-                            title={copySuccess === `hook-${index + 100}` ? 'Copied!' : 'Copy description'}
-                          >
-                            {copySuccess === `hook-${index + 100}` ? (
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => handleExportPNG(index)}
+                              disabled={isExporting}
+                              className={cn(
+                                'p-1 rounded transition-colors',
+                                'text-light-text-secondary dark:text-dark-text-secondary hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/20',
+                                isExporting && 'opacity-50 cursor-not-allowed'
+                              )}
+                              title="Download as PNG"
+                            >
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
                               </svg>
-                            ) : (
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                              </svg>
-                            )}
-                          </button>
+                            </button>
+                            <button
+                              onClick={() => handleCopyHook(concept.description, index + 100)}
+                              className={cn(
+                                'p-1 rounded transition-colors',
+                                copySuccess === `hook-${index + 100}`
+                                  ? 'text-success bg-success/10'
+                                  : 'text-light-text-secondary dark:text-dark-text-secondary hover:text-linkedin hover:bg-linkedin/10'
+                              )}
+                              title={copySuccess === `hook-${index + 100}` ? 'Copied!' : 'Copy description'}
+                            >
+                              {copySuccess === `hook-${index + 100}` ? (
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                </svg>
+                              ) : (
+                                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                </svg>
+                              )}
+                            </button>
+                          </div>
                         </div>
 
                         {/* Visual Preview Mockup */}
