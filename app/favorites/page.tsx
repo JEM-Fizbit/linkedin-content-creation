@@ -435,9 +435,9 @@ export default function FavoritesPage() {
                   </div>
 
                   {/* Content */}
-                  <p className="text-light-text-primary dark:text-dark-text-primary text-sm leading-relaxed line-clamp-4">
+                  <div className="text-light-text-primary dark:text-dark-text-primary text-sm leading-relaxed line-clamp-4">
                     {renderContent(favorite)}
-                  </p>
+                  </div>
 
                   {/* Footer */}
                   <div className="mt-4 pt-3 border-t border-gray-100 dark:border-gray-700 flex items-center justify-between">
