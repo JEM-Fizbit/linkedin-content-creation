@@ -1,21 +1,20 @@
 import { NextResponse } from 'next/server'
+import { isConfigured } from '@/lib/claude'
 import type { ConnectionStatus } from '@/types'
 
 // GET /api/connection/status - Check Claude SDK connection status
 export async function GET() {
   try {
-    // For now, we'll return a placeholder status
-    // In production, this would actually check the Claude SDK connection
-    // by making a lightweight request to the local Claude instance
+    const connected = isConfigured()
 
     const status: ConnectionStatus = {
-      connected: true, // This will be replaced with actual connection check
+      connected,
       last_checked: new Date().toISOString(),
     }
 
-    // TODO: Implement actual Claude SDK connection check
-    // const response = await fetch('http://localhost:CLAUDE_PORT/health')
-    // status.connected = response.ok
+    if (!connected) {
+      status.error = 'ANTHROPIC_API_KEY not configured in .env.local'
+    }
 
     return NextResponse.json(status)
   } catch (error) {

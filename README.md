@@ -69,7 +69,7 @@ npm run dev
 ## Project Structure
 
 ```
-linkedin-content-creation/
+LI-Creator/
 ├── app/                    # Next.js App Router pages
 │   ├── api/               # API routes
 │   │   ├── sessions/      # Session CRUD endpoints

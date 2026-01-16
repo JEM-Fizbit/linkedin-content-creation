@@ -1,67 +1,188 @@
 import { NextRequest, NextResponse } from 'next/server'
 import db from '@/lib/db'
-import { generateId } from '@/lib/utils'
-import type { Output, Message } from '@/types'
+import { generateId, safeJsonParse } from '@/lib/utils'
+import anthropic, { SYSTEM_PROMPT, CONTENT_GENERATION_PROMPT, isConfigured } from '@/lib/claude'
+import { isSearchConfigured, conductResearch, buildResearchContext, formatResearchForPrompt } from '@/lib/search'
+import type { Output, Message, VisualConcept, Project, Session, Platform, Citation, ResearchContext, SearchResult } from '@/types'
 
-// POST /api/outputs - Generate structured output for a session
+interface GeneratedContent {
+  hooks: string[]
+  body_content: string
+  intros: string[]
+  titles: string[]
+  ctas: string[]
+  visual_concepts: VisualConcept[]
+  citations?: Citation[]
+  researchContext?: ResearchContext
+}
+
+// Platform-specific content generation prompts
+const PLATFORM_GENERATION_PROMPTS: Record<Platform, string> = {
+  linkedin: `Generate content for a LinkedIn post. Include:
+- 5 attention-grabbing hooks (opening lines)
+- Body content (150-300 words)
+- 3 call-to-action options
+- 3 visual concept descriptions for accompanying images`,
+
+  youtube: `Generate content for a YouTube video. Include:
+- 5 attention-grabbing hooks (video opening lines)
+- 3 video intro scripts (30-60 seconds each)
+- 5 video title options (SEO-optimized, under 60 characters)
+- 3 thumbnail concept descriptions`,
+
+  facebook: `Generate content for a Facebook post. Include:
+- 5 attention-grabbing hooks (opening lines)
+- Body content (100-250 words)
+- 3 call-to-action options
+- 3 visual concept descriptions for accompanying images`,
+}
+
+// POST /api/outputs - Generate structured output for a session or project
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { session_id } = body
+    const { session_id, project_id } = body
 
-    if (!session_id) {
+    if (!session_id && !project_id) {
       return NextResponse.json(
-        { error: 'session_id is required' },
+        { error: 'Either session_id or project_id is required' },
         { status: 400 }
       )
     }
 
-    // Verify session exists
-    const sessionStmt = db.prepare('SELECT * FROM sessions WHERE id = ?')
-    const session = sessionStmt.get(session_id) as { id: string; original_idea: string } | undefined
-
-    if (!session) {
+    // Check if Claude is configured
+    if (!isConfigured()) {
       return NextResponse.json(
-        { error: 'Session not found' },
-        { status: 404 }
+        { error: 'Claude API is not configured. Please set ANTHROPIC_API_KEY in .env.local' },
+        { status: 503 }
       )
     }
 
-    // Get conversation history for context
-    const messagesStmt = db.prepare('SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC')
-    const messages = messagesStmt.all(session_id) as Message[]
+    let contextInfo: { topic: string; platform: Platform; targetAudience?: string; contentStyle?: string } | null = null
+    let messages: Message[] = []
+    let existingOutput: Output | undefined
 
-    // Check if output already exists
-    const existingOutputStmt = db.prepare('SELECT * FROM outputs WHERE session_id = ?')
-    const existingOutput = existingOutputStmt.get(session_id) as Output | undefined
+    // Handle project-based generation (new)
+    if (project_id) {
+      const projectStmt = db.prepare('SELECT * FROM projects WHERE id = ?')
+      const project = projectStmt.get(project_id) as Project | undefined
 
-    // Generate structured content based on conversation
-    const generatedContent = generateStructuredContent(session.original_idea, messages)
+      if (!project) {
+        return NextResponse.json(
+          { error: 'Project not found' },
+          { status: 404 }
+        )
+      }
+
+      contextInfo = {
+        topic: project.topic,
+        platform: project.platform,
+        targetAudience: project.target_audience,
+        contentStyle: project.content_style,
+      }
+
+      const messagesStmt = db.prepare('SELECT * FROM messages WHERE project_id = ? ORDER BY created_at ASC')
+      messages = messagesStmt.all(project_id) as Message[]
+
+      const existingOutputStmt = db.prepare('SELECT * FROM outputs WHERE project_id = ?')
+      const outputRow = existingOutputStmt.get(project_id) as Record<string, unknown> | undefined
+      if (outputRow) {
+        existingOutput = parseOutputRow(outputRow)
+      }
+    }
+    // Handle session-based generation (legacy)
+    else if (session_id) {
+      const sessionStmt = db.prepare('SELECT * FROM sessions WHERE id = ?')
+      const session = sessionStmt.get(session_id) as Session | undefined
+
+      if (!session) {
+        return NextResponse.json(
+          { error: 'Session not found' },
+          { status: 404 }
+        )
+      }
+
+      contextInfo = {
+        topic: session.original_idea,
+        platform: 'linkedin',
+      }
+
+      const messagesStmt = db.prepare('SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC')
+      messages = messagesStmt.all(session_id) as Message[]
+
+      const existingOutputStmt = db.prepare('SELECT * FROM outputs WHERE session_id = ?')
+      const outputRow = existingOutputStmt.get(session_id) as Record<string, unknown> | undefined
+      if (outputRow) {
+        existingOutput = parseOutputRow(outputRow)
+      }
+    }
+
+    if (!contextInfo) {
+      return NextResponse.json(
+        { error: 'Unable to load context' },
+        { status: 500 }
+      )
+    }
+
+    // Generate structured content using Claude with optional web search
+    const generatedContent = await generateStructuredContent(contextInfo, messages, project_id)
 
     const now = new Date().toISOString()
+
+    // Save research result to database if we have one
+    if (project_id && generatedContent.researchContext && generatedContent.citations?.length) {
+      try {
+        const researchId = generateId()
+        const insertResearchStmt = db.prepare(`
+          INSERT INTO research_results (id, project_id, query, results, citations, provider, summary, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+        insertResearchStmt.run(
+          researchId,
+          project_id,
+          contextInfo.topic,
+          JSON.stringify(generatedContent.researchContext.searchResults),
+          JSON.stringify(generatedContent.citations),
+          'claude', // Default provider for now
+          generatedContent.researchContext.summary,
+          now
+        )
+      } catch (error) {
+        console.error('Failed to save research results:', error)
+      }
+    }
 
     if (existingOutput) {
       // Update existing output
       const updateStmt = db.prepare(`
         UPDATE outputs
-        SET hooks = ?, body_content = ?, ctas = ?, visual_concepts = ?, updated_at = ?
-        WHERE session_id = ?
+        SET hooks = ?, body_content = ?, intros = ?, titles = ?, ctas = ?, visual_concepts = ?,
+            research_context = ?, citations = ?, updated_at = ?
+        WHERE ${project_id ? 'project_id' : 'session_id'} = ?
       `)
       updateStmt.run(
         JSON.stringify(generatedContent.hooks),
         generatedContent.body_content,
+        JSON.stringify(generatedContent.intros),
+        JSON.stringify(generatedContent.titles),
         JSON.stringify(generatedContent.ctas),
         JSON.stringify(generatedContent.visual_concepts),
+        generatedContent.researchContext ? JSON.stringify(generatedContent.researchContext) : null,
+        JSON.stringify(generatedContent.citations || []),
         now,
-        session_id
+        project_id || session_id
       )
 
       const output: Output = {
         ...existingOutput,
         hooks: generatedContent.hooks,
         body_content: generatedContent.body_content,
+        intros: generatedContent.intros,
+        titles: generatedContent.titles,
         ctas: generatedContent.ctas,
         visual_concepts: generatedContent.visual_concepts,
+        research_context: generatedContent.researchContext,
+        citations: generatedContent.citations,
         updated_at: now,
       }
 
@@ -70,36 +191,94 @@ export async function POST(request: NextRequest) {
       // Create new output
       const outputId = generateId()
 
-      const insertStmt = db.prepare(`
-        INSERT INTO outputs (id, session_id, hooks, hooks_original, body_content, body_content_original, ctas, ctas_original, visual_concepts, visual_concepts_original, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `)
-      insertStmt.run(
-        outputId,
-        session_id,
-        JSON.stringify(generatedContent.hooks),
-        JSON.stringify(generatedContent.hooks),
-        generatedContent.body_content,
-        generatedContent.body_content,
-        JSON.stringify(generatedContent.ctas),
-        JSON.stringify(generatedContent.ctas),
-        JSON.stringify(generatedContent.visual_concepts),
-        JSON.stringify(generatedContent.visual_concepts),
-        now,
-        now
-      )
+      if (project_id) {
+        const insertStmt = db.prepare(`
+          INSERT INTO outputs (
+            id, project_id, hooks, hooks_original, body_content, body_content_original,
+            intros, intros_original, titles, titles_original,
+            ctas, ctas_original, visual_concepts, visual_concepts_original,
+            research_context, citations,
+            created_at, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+        insertStmt.run(
+          outputId,
+          project_id,
+          JSON.stringify(generatedContent.hooks),
+          JSON.stringify(generatedContent.hooks),
+          generatedContent.body_content,
+          generatedContent.body_content,
+          JSON.stringify(generatedContent.intros),
+          JSON.stringify(generatedContent.intros),
+          JSON.stringify(generatedContent.titles),
+          JSON.stringify(generatedContent.titles),
+          JSON.stringify(generatedContent.ctas),
+          JSON.stringify(generatedContent.ctas),
+          JSON.stringify(generatedContent.visual_concepts),
+          JSON.stringify(generatedContent.visual_concepts),
+          generatedContent.researchContext ? JSON.stringify(generatedContent.researchContext) : null,
+          JSON.stringify(generatedContent.citations || []),
+          now,
+          now
+        )
+      } else {
+        const insertStmt = db.prepare(`
+          INSERT INTO outputs (
+            id, session_id, hooks, hooks_original, body_content, body_content_original,
+            intros, intros_original, titles, titles_original,
+            ctas, ctas_original, visual_concepts, visual_concepts_original,
+            research_context, citations,
+            created_at, updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+        insertStmt.run(
+          outputId,
+          session_id,
+          JSON.stringify(generatedContent.hooks),
+          JSON.stringify(generatedContent.hooks),
+          generatedContent.body_content,
+          generatedContent.body_content,
+          JSON.stringify(generatedContent.intros),
+          JSON.stringify(generatedContent.intros),
+          JSON.stringify(generatedContent.titles),
+          JSON.stringify(generatedContent.titles),
+          JSON.stringify(generatedContent.ctas),
+          JSON.stringify(generatedContent.ctas),
+          JSON.stringify(generatedContent.visual_concepts),
+          JSON.stringify(generatedContent.visual_concepts),
+          generatedContent.researchContext ? JSON.stringify(generatedContent.researchContext) : null,
+          JSON.stringify(generatedContent.citations || []),
+          now,
+          now
+        )
+      }
 
       const output: Output = {
         id: outputId,
-        session_id,
+        session_id: session_id || undefined,
+        project_id: project_id || undefined,
         hooks: generatedContent.hooks,
         hooks_original: generatedContent.hooks,
+        selected_hook_index: 0,
         body_content: generatedContent.body_content,
         body_content_original: generatedContent.body_content,
+        selected_body_index: 0,
+        intros: generatedContent.intros,
+        intros_original: generatedContent.intros,
+        selected_intro_index: 0,
+        titles: generatedContent.titles,
+        titles_original: generatedContent.titles,
+        selected_title_index: 0,
         ctas: generatedContent.ctas,
         ctas_original: generatedContent.ctas,
+        selected_cta_index: 0,
         visual_concepts: generatedContent.visual_concepts,
         visual_concepts_original: generatedContent.visual_concepts,
+        selected_visual_index: 0,
+        research_context: generatedContent.researchContext,
+        citations: generatedContent.citations,
         created_at: now,
         updated_at: now,
       }
@@ -115,80 +294,225 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// Helper function to generate structured content
-// In production, this would call Claude SDK
-function generateStructuredContent(originalIdea: string, messages: Message[]) {
-  // Extract key themes from the original idea
-  const ideaLower = originalIdea.toLowerCase()
+// Parse a database output row into an Output object
+function parseOutputRow(row: Record<string, unknown>): Output {
+  return {
+    id: row.id as string,
+    session_id: row.session_id as string | undefined,
+    project_id: row.project_id as string | undefined,
+    hooks: safeJsonParse(row.hooks as string, []),
+    hooks_original: safeJsonParse(row.hooks_original as string, []),
+    selected_hook_index: row.selected_hook_index as number || 0,
+    body_content: row.body_content as string || '',
+    body_content_original: row.body_content_original as string || '',
+    selected_body_index: row.selected_body_index as number || 0,
+    intros: safeJsonParse(row.intros as string, []),
+    intros_original: safeJsonParse(row.intros_original as string, []),
+    selected_intro_index: row.selected_intro_index as number || 0,
+    titles: safeJsonParse(row.titles as string, []),
+    titles_original: safeJsonParse(row.titles_original as string, []),
+    selected_title_index: row.selected_title_index as number || 0,
+    ctas: safeJsonParse(row.ctas as string, []),
+    ctas_original: safeJsonParse(row.ctas_original as string, []),
+    selected_cta_index: row.selected_cta_index as number || 0,
+    visual_concepts: safeJsonParse(row.visual_concepts as string, []),
+    visual_concepts_original: safeJsonParse(row.visual_concepts_original as string, []),
+    selected_visual_index: row.selected_visual_index as number || 0,
+    research_context: row.research_context ? safeJsonParse(row.research_context as string, undefined) : undefined,
+    citations: safeJsonParse(row.citations as string, []),
+    created_at: row.created_at as string,
+    updated_at: row.updated_at as string,
+  }
+}
 
-  let topic = 'professional growth'
-  if (ideaLower.includes('ai') || ideaLower.includes('artificial intelligence')) {
-    topic = 'AI and technology'
-  } else if (ideaLower.includes('leadership') || ideaLower.includes('leader')) {
-    topic = 'leadership'
-  } else if (ideaLower.includes('career') || ideaLower.includes('job')) {
-    topic = 'career development'
-  } else if (ideaLower.includes('remote') || ideaLower.includes('work from home')) {
-    topic = 'remote work'
-  } else if (ideaLower.includes('startup') || ideaLower.includes('entrepreneur')) {
-    topic = 'entrepreneurship'
+// Get project search settings from database
+function getProjectSearchSettings(projectId: string): { enabled: boolean; provider: 'claude' | 'perplexity' | 'auto'; maxSearches: number } {
+  try {
+    const stmt = db.prepare('SELECT * FROM project_search_settings WHERE project_id = ?')
+    const settings = stmt.get(projectId) as { web_search_enabled: number; search_provider: string; max_searches: number } | undefined
+
+    if (settings) {
+      return {
+        enabled: settings.web_search_enabled === 1,
+        provider: settings.search_provider as 'claude' | 'perplexity' | 'auto',
+        maxSearches: settings.max_searches
+      }
+    }
+  } catch {
+    // Table might not exist or other error, use defaults
   }
 
-  const hooks = [
-    `I made a decision 6 months ago that changed everything about how I approach ${topic}. Here's what happened...`,
-    `Everyone's talking about ${topic}. But here's what most people are getting completely wrong...`,
-    `What if I told you the biggest myth about ${topic} is costing you opportunities every single day?`
-  ]
+  // Default: web search enabled with Claude provider
+  return { enabled: true, provider: 'claude', maxSearches: 5 }
+}
 
-  const body_content = `Six months ago, I found myself at a crossroads with ${topic}.
+// Generate structured content using Claude API with optional web search
+async function generateStructuredContent(
+  contextInfo: { topic: string; platform: Platform; targetAudience?: string; contentStyle?: string },
+  messages: Message[],
+  projectId?: string
+): Promise<GeneratedContent> {
+  // Get search settings for this project
+  const searchSettings = projectId ? getProjectSearchSettings(projectId) : { enabled: true, provider: 'claude' as const, maxSearches: 5 }
+  const useWebSearch = searchSettings.enabled && isSearchConfigured()
 
-Like many professionals, I thought I had it figured out. I was doing what everyone else was doing, following the "best practices" that filled my LinkedIn feed.
+  // Conduct research if enabled
+  let researchContext: ResearchContext | undefined
+  let researchSearchResult: SearchResult | undefined
 
-But something wasn't working.
+  if (useWebSearch) {
+    try {
+      const researchQuery = contextInfo.targetAudience
+        ? `${contextInfo.topic} - trends, insights, and best practices for ${contextInfo.targetAudience}`
+        : `${contextInfo.topic} - trends, insights, and best practices`
 
-That's when I decided to take a different approach. Instead of following the crowd, I started questioning the assumptions I'd been operating under.
+      researchSearchResult = await conductResearch(researchQuery, {
+        enabled: true,
+        provider: searchSettings.provider,
+        maxSearches: searchSettings.maxSearches
+      })
 
-Here's what I discovered:
-
-The conventional wisdom about ${topic} is often based on outdated thinking. What worked five years ago doesn't necessarily work today.
-
-The professionals who are thriving aren't just working harder - they're thinking differently about the fundamentals.
-
-Three key shifts made all the difference:
-
-1. Embracing experimentation over perfection
-2. Building genuine connections instead of transactional relationships
-3. Focusing on impact rather than activity
-
-The results? More meaningful work, better opportunities, and a renewed sense of purpose.
-
-If you're feeling stuck in your approach to ${topic}, maybe it's time to question your assumptions too.`
-
-  const ctas = [
-    `What's one assumption about ${topic} you've started questioning lately? I'd love to hear your thoughts in the comments.`,
-    `If this resonated with you, give it a like and follow me for more insights on ${topic}. I share practical tips every week.`,
-    `Agree? Disagree? Either way, I want to hear your perspective. Drop a comment below - I read and respond to every single one.`
-  ]
-
-  const visual_concepts = [
-    {
-      description: `A minimalist split-screen graphic showing "Then vs Now" - the left side showing traditional ${topic} approaches in muted colors, the right side showing modern approaches in vibrant colors`,
-      preview_data: undefined
-    },
-    {
-      description: `A clean carousel design with 5 slides: Title slide with hook, 3 key insight slides with icons, and a CTA slide with your profile photo`,
-      preview_data: undefined
-    },
-    {
-      description: `An infographic showing the "3 Mindset Shifts" as a visual journey/path, with before/after states at each stage`,
-      preview_data: undefined
+      researchContext = buildResearchContext([researchSearchResult])
+      console.log(`Research conducted: ${researchSearchResult.citations.length} citations found`)
+    } catch (error) {
+      console.error('Research failed, proceeding without:', error)
     }
-  ]
+  }
+
+  // Build conversation context
+  const conversationContext = messages.map(m => `${m.role}: ${m.content}`).join('\n\n')
+
+  // Build context description
+  let contextDesc = `Topic: "${contextInfo.topic}"`
+  if (contextInfo.targetAudience) {
+    contextDesc += `\nTarget audience: ${contextInfo.targetAudience}`
+  }
+  if (contextInfo.contentStyle) {
+    contextDesc += `\nContent style/tone: ${contextInfo.contentStyle}`
+  }
+
+  // Add research context if available
+  if (researchContext) {
+    contextDesc += formatResearchForPrompt(researchContext)
+  }
+
+  const platformPrompt = PLATFORM_GENERATION_PROMPTS[contextInfo.platform]
+
+  const prompt = `${contextDesc}
+
+Conversation history:
+${conversationContext || 'No conversation yet.'}
+
+Based on the above context${researchContext ? ' and research findings' : ''}, ${platformPrompt}
+
+${CONTENT_GENERATION_PROMPT}
+
+${researchContext ? 'IMPORTANT: Use the research context provided to make your content factually accurate and up-to-date. Reference specific insights or statistics where relevant.' : ''}
+
+Return your response as a JSON object with this structure:
+{
+  "hooks": ["hook1", "hook2", ...],
+  "body_content": "full body text here",
+  "intros": ["intro1", "intro2", ...],
+  "titles": ["title1", "title2", ...],
+  "ctas": ["cta1", "cta2", ...],
+  "visual_concepts": [{"description": "visual concept 1"}, ...]
+}
+
+For ${contextInfo.platform === 'youtube' ? 'YouTube content, focus on intros, titles, and visual_concepts (thumbnails). body_content can be a brief description.' : 'LinkedIn/Facebook content, focus on hooks, body_content, ctas, and visual_concepts. intros and titles can be empty arrays.'}`
+
+  const response = await anthropic.messages.create({
+    model: 'claude-sonnet-4-20250514',
+    max_tokens: 2048,
+    system: SYSTEM_PROMPT,
+    messages: [{ role: 'user', content: prompt }]
+  })
+
+  const responseText = response.content[0].type === 'text' ? response.content[0].text : ''
+
+  try {
+    // Try to parse the JSON response
+    // Remove any markdown code blocks if present
+    let jsonStr = responseText.trim()
+    if (jsonStr.startsWith('```json')) {
+      jsonStr = jsonStr.slice(7)
+    } else if (jsonStr.startsWith('```')) {
+      jsonStr = jsonStr.slice(3)
+    }
+    if (jsonStr.endsWith('```')) {
+      jsonStr = jsonStr.slice(0, -3)
+    }
+    jsonStr = jsonStr.trim()
+
+    const parsed = JSON.parse(jsonStr)
+    return {
+      hooks: parsed.hooks || [],
+      body_content: parsed.body_content || '',
+      intros: parsed.intros || [],
+      titles: parsed.titles || [],
+      ctas: parsed.ctas || [],
+      visual_concepts: parsed.visual_concepts || [],
+      citations: researchSearchResult?.citations,
+      researchContext
+    }
+  } catch {
+    // If JSON parsing fails, return a fallback structure
+    console.error('Failed to parse Claude response as JSON:', responseText)
+    return {
+      ...getDefaultContent(contextInfo.platform, responseText),
+      citations: researchSearchResult?.citations,
+      researchContext
+    }
+  }
+}
+
+// Get default content based on platform
+function getDefaultContent(platform: Platform, fallbackText: string): GeneratedContent {
+  if (platform === 'youtube') {
+    return {
+      hooks: [
+        'In this video, I\'m going to show you something that changed everything...',
+        'What if I told you there\'s a better way?',
+        'Stop what you\'re doing - this is important.'
+      ],
+      body_content: fallbackText || 'Video description pending.',
+      intros: [
+        'Hey everyone! Welcome back to the channel. Today we\'re diving into something exciting...',
+        'What\'s up! If you\'re new here, hit that subscribe button because this one\'s going to be good...',
+        'Before we get started, I want to share something that completely changed my perspective...'
+      ],
+      titles: [
+        'This Changed Everything (You Need To See This)',
+        'The Secret Most People Don\'t Know',
+        'I Tested This For 30 Days - Here\'s What Happened'
+      ],
+      ctas: [],
+      visual_concepts: [
+        { description: 'Thumbnail with shocked face expression and bold text overlay' },
+        { description: 'Before/after split image showing transformation' },
+        { description: 'Clean thumbnail with key stat highlighted' }
+      ]
+    }
+  }
 
   return {
-    hooks,
-    body_content,
-    ctas,
-    visual_concepts
+    hooks: [
+      'Here\'s a perspective that might change how you think about this topic...',
+      'I learned something surprising recently that I need to share...',
+      'Most people get this wrong. Here\'s what I discovered...'
+    ],
+    body_content: fallbackText || 'Content generation failed. Please try again.',
+    intros: [],
+    titles: [],
+    ctas: [
+      'What\'s your take on this? Share in the comments below.',
+      'If this resonated, follow me for more insights.',
+      'Tag someone who needs to see this.'
+    ],
+    visual_concepts: [
+      { description: 'A clean infographic highlighting the key points' },
+      { description: 'A quote card with the main insight' },
+      { description: 'A carousel breaking down the topic step by step' }
+    ]
   }
 }

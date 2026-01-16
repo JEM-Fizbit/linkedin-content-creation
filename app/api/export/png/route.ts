@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import db from '@/lib/db'
 import type { Session } from '@/types'
-import { createCanvas, registerFont } from 'canvas'
+import { createCanvas, registerFont, CanvasRenderingContext2D } from 'canvas'
 
 interface DbOutput {
   id: string
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
     const pngBuffer = generateConceptPNG(concept, concept_index, session.title)
 
     // Return the PNG content with appropriate headers for download
-    return new NextResponse(pngBuffer, {
+    return new NextResponse(new Uint8Array(pngBuffer), {
       headers: {
         'Content-Type': 'image/png',
         'Content-Disposition': `attachment; filename="${sanitizeFilename(session.title)}-concept-${concept_index + 1}.png"`,
@@ -142,7 +142,7 @@ function generateConceptPNG(
 }
 
 function drawSplitScreenDesign(
-  ctx: ReturnType<typeof createCanvas>['prototype']['getContext'],
+  ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
   description: string
@@ -214,7 +214,7 @@ function drawSplitScreenDesign(
 }
 
 function drawCarouselDesign(
-  ctx: ReturnType<typeof createCanvas>['prototype']['getContext'],
+  ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
   description: string
@@ -270,7 +270,7 @@ function drawCarouselDesign(
 }
 
 function drawJourneyDesign(
-  ctx: ReturnType<typeof createCanvas>['prototype']['getContext'],
+  ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
   description: string
@@ -334,7 +334,7 @@ function drawJourneyDesign(
 }
 
 function drawDefaultDesign(
-  ctx: ReturnType<typeof createCanvas>['prototype']['getContext'],
+  ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
   description: string,
@@ -367,7 +367,7 @@ function drawDefaultDesign(
 }
 
 function drawWrappedText(
-  ctx: ReturnType<typeof createCanvas>['prototype']['getContext'],
+  ctx: CanvasRenderingContext2D,
   text: string,
   x: number,
   y: number,
