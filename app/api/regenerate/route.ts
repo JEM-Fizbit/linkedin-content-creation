@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import db from '@/lib/db'
 import anthropic, { SYSTEM_PROMPT, SECTION_PROMPTS, isConfigured } from '@/lib/claude'
+import { composeSystemPrompt } from '@/lib/prompts/compose'
 import type { Output, Message, VisualConcept, Project, Session, Platform, RegenerateSection } from '@/types'
 import { safeJsonParse } from '@/lib/utils'
 
@@ -152,7 +153,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Generate new content for the specific section using Claude
-    const regeneratedContent = await regenerateSection(section, contextInfo, messages, append ? 2 : undefined)
+    const regeneratedContent = await regenerateSection(section, contextInfo, messages, project_id, append ? 2 : undefined)
 
     const now = new Date().toISOString()
     const idColumn = project_id ? 'project_id' : 'session_id'
@@ -228,6 +229,7 @@ async function regenerateSection(
   section: RegenerateSection,
   contextInfo: { topic: string; platform: Platform; targetAudience?: string; contentStyle?: string },
   messages: Message[],
+  projectId?: string,
   count?: number // Optional count for generating fewer items (used in append mode)
 ): Promise<string[] | string | VisualConcept[]> {
   // Build conversation context
@@ -242,6 +244,47 @@ async function regenerateSection(
     contextDesc += `\nContent style/tone: ${contextInfo.contentStyle}`
   }
   contextDesc += `\nPlatform: ${contextInfo.platform}`
+
+  // Add uploaded text sources if available
+  if (projectId) {
+    try {
+      const sourcesStmt = db.prepare(
+        'SELECT title, content FROM project_sources WHERE project_id = ? AND enabled = 1 ORDER BY created_at ASC'
+      )
+      const sources = sourcesStmt.all(projectId) as { title: string; content: string }[]
+
+      if (sources.length > 0) {
+        let totalChars = 0
+        const MAX_CHARS = 8000
+        contextDesc += '\n\n--- Reference Materials ---\n'
+        contextDesc += 'Use these sources to inform your content:\n\n'
+        for (const source of sources) {
+          const available = MAX_CHARS - totalChars
+          if (available <= 0) break
+          const content = source.content.length > available
+            ? source.content.substring(0, available) + '...[truncated]'
+            : source.content
+          contextDesc += `### ${source.title}\n${content}\n\n`
+          totalChars += content.length
+        }
+      }
+
+      if (section === 'visuals') {
+        const assetsStmt = db.prepare(
+          'SELECT type, filename FROM project_assets WHERE project_id = ?'
+        )
+        const assets = assetsStmt.all(projectId) as { type: string; filename: string }[]
+        if (assets.length > 0) {
+          contextDesc += '\n\n--- Visual References ---\n'
+          contextDesc += 'Reference images provided: '
+          contextDesc += assets.map(a => `${a.filename} (${a.type.replace('_', ' ')})`).join(', ')
+          contextDesc += '\nUse their style/branding in visual concept descriptions.\n'
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load project sources:', err)
+    }
+  }
 
   let sectionPrompt = EXTENDED_SECTION_PROMPTS[section]
 
@@ -264,7 +307,7 @@ Task: ${sectionPrompt}`
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
     max_tokens: 1024,
-    system: SYSTEM_PROMPT,
+    system: composeSystemPrompt(SYSTEM_PROMPT, contextInfo.platform, section),
     messages: [{ role: 'user', content: prompt }]
   })
 

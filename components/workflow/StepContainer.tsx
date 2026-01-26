@@ -43,7 +43,7 @@ export function StepContainer({
   const displayTitle = title || STEP_LABELS[currentStep]
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col flex-1 min-h-0">
       {/* Step Header */}
       <div className="px-6 py-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
         <div className="flex items-center justify-between">

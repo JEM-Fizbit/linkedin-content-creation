@@ -2131,7 +2131,7 @@ ${cta}`
                     No Content Generated Yet
                   </h3>
                   <p className="text-light-text-secondary dark:text-dark-text-secondary mb-4 max-w-sm">
-                    Chat with Claude to refine your idea, then click "Generate Content" to create hooks, body content, CTAs, and visual concepts.
+                    Chat with Claude to refine your idea, then click &quot;Generate Content&quot; to create hooks, body content, CTAs, and visual concepts.
                   </p>
                   <button
                     onClick={handleGenerateContent}

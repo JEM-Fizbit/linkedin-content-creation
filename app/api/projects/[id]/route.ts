@@ -187,7 +187,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     if (body.current_step !== undefined) {
-      const validSteps = ['hooks', 'body', 'intros', 'titles', 'ctas', 'visuals', 'thumbnails', 'complete']
+      const validSteps = ['hooks', 'body', 'intros', 'titles', 'ctas', 'visuals', 'thumbnails', 'carousel', 'complete']
       if (!validSteps.includes(body.current_step)) {
         return NextResponse.json(
           { error: 'Invalid current_step' },

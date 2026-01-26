@@ -20,9 +20,17 @@ function getClient(): GoogleGenAI {
   return ai
 }
 
+// Reference image for multimodal input
+export interface ReferenceImage {
+  base64Data: string
+  mimeType: string
+}
+
 // Image generation options
 export interface ImageGenerationOptions {
   prompt: string
+  sourceImage?: ReferenceImage  // The original image to modify (for refinement/editing)
+  referenceImages?: ReferenceImage[]  // Style/person references for guidance
   width?: number
   height?: number
   numberOfImages?: number
@@ -42,6 +50,8 @@ export interface GeneratedImageResult {
 export async function generateImage(options: ImageGenerationOptions): Promise<GeneratedImageResult[]> {
   const {
     prompt,
+    sourceImage,
+    referenceImages,
     numberOfImages = 1,
     aspectRatio = '1:1',
   } = options
@@ -53,14 +63,72 @@ export async function generateImage(options: ImageGenerationOptions): Promise<Ge
   const client = getClient()
 
   try {
+    type ContentPart = { text: string } | { inlineData: { data: string; mimeType: string } }
+    let contents: string | ContentPart[]
+
+    if (sourceImage) {
+      // REFINEMENT MODE: editing an existing image
+      const parts: ContentPart[] = []
+      parts.push({ text: 'Here is the original image to modify:' })
+      parts.push({
+        inlineData: { data: sourceImage.base64Data, mimeType: sourceImage.mimeType }
+      })
+
+      if (referenceImages && referenceImages.length > 0) {
+        parts.push({ text: '\nHere are reference images to use as guidance:' })
+        for (const img of referenceImages.slice(0, 3)) {
+          parts.push({
+            inlineData: { data: img.base64Data, mimeType: img.mimeType }
+          })
+        }
+        parts.push({ text: `\nModify the original image according to these instructions, using the reference images as guidance: ${prompt}` })
+      } else {
+        parts.push({ text: `\nModify the original image according to these instructions: ${prompt}` })
+      }
+
+      contents = parts
+    } else if (referenceImages && referenceImages.length > 0) {
+      // GENERATION MODE with style references
+      const parts: ContentPart[] = []
+      parts.push({ text: 'Reference images for style and branding:' })
+      for (const img of referenceImages.slice(0, 3)) {
+        parts.push({
+          inlineData: { data: img.base64Data, mimeType: img.mimeType }
+        })
+      }
+      parts.push({ text: `\nGenerate a new image inspired by the style and branding of the references above. Prompt: ${prompt}` })
+      contents = parts
+    } else {
+      // PLAIN GENERATION: text prompt only
+      contents = prompt
+    }
+
+    // Log the prompt for debugging
+    console.log('[Gemini] Generating image with prompt:', typeof contents === 'string' ? contents.substring(0, 200) : '[multimodal input]')
+    console.log('[Gemini] Using reference images:', referenceImages?.length || 0)
+    console.log('[Gemini] Using source image (refinement):', !!sourceImage)
+
     // Generate the image using Nano Banana (gemini-2.5-flash-image)
     const response = await client.models.generateContent({
       model: 'gemini-2.5-flash-image',
-      contents: prompt,
+      contents,
       config: {
         responseModalities: ['TEXT', 'IMAGE'],
       },
     })
+
+    // Log response structure for debugging
+    console.log('[Gemini] Response candidates:', response.candidates?.length || 0)
+    if (response.candidates && response.candidates.length > 0) {
+      const candidate = response.candidates[0]
+      console.log('[Gemini] Candidate finish reason:', candidate.finishReason)
+      console.log('[Gemini] Parts count:', candidate.content?.parts?.length || 0)
+
+      // Log safety ratings if present
+      if (candidate.safetyRatings) {
+        console.log('[Gemini] Safety ratings:', JSON.stringify(candidate.safetyRatings))
+      }
+    }
 
     const images: GeneratedImageResult[] = []
 
@@ -80,7 +148,24 @@ export async function generateImage(options: ImageGenerationOptions): Promise<Ge
     }
 
     if (images.length === 0) {
-      throw new Error('No images were generated')
+      // Check for text response explaining why no image was generated
+      let explanation = ''
+      if (response.candidates && response.candidates.length > 0) {
+        const textParts = (response.candidates[0].content?.parts || [])
+          .filter(p => 'text' in p)
+          .map(p => (p as { text: string }).text)
+        if (textParts.length > 0) {
+          explanation = textParts.join(' ')
+          console.error('[Gemini] Model returned text instead of image:', explanation)
+        }
+      }
+
+      // Also check for blocked prompts
+      if (response.candidates?.[0]?.finishReason === 'SAFETY') {
+        throw new Error('The image request was blocked by content safety filters. Try a different description.')
+      }
+
+      throw new Error(explanation || 'No images were generated. The model may be busy or the request was filtered.')
     }
 
     return images.slice(0, numberOfImages)
@@ -108,18 +193,18 @@ export async function upscaleImage(
 export async function refineImage(
   originalPrompt: string,
   refinementPrompt: string,
-  base64Data?: string
+  base64Data?: string,
+  referenceImages?: ReferenceImage[]
 ): Promise<GeneratedImageResult[]> {
   if (!isConfigured()) {
     throw new Error('Google API is not configured')
   }
 
-  // Combine prompts for refinement
-  const combinedPrompt = `${originalPrompt}\n\nRefinements: ${refinementPrompt}`
-
-  // Generate new image with refined prompt
+  // Pass the original image as sourceImage so Gemini can see and modify it
   return generateImage({
-    prompt: combinedPrompt,
+    prompt: refinementPrompt,
+    sourceImage: base64Data ? { base64Data, mimeType: 'image/png' } : undefined,
+    referenceImages,
     numberOfImages: 1,
   })
 }

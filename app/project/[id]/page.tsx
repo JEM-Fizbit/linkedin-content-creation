@@ -11,19 +11,27 @@ import { ContentCard } from '@/components/cards/ContentCard'
 import { ImageCard } from '@/components/cards/ImageCard'
 import { CustomContentCard, SkipOptionCard } from '@/components/cards/CustomContentCard'
 import { AssistantPanel } from '@/components/assistant/AssistantPanel'
+import { ContextPanel } from '@/components/context/ContextPanel'
 import { ImageLightbox } from '@/components/modals/ImageLightbox'
 import { ContentHistoryModal } from '@/components/modals/ContentHistoryModal'
 import { RefineImageModal } from '@/components/modals/RefineImageModal'
 import { ThumbnailHistoryModal } from '@/components/modals/ThumbnailHistoryModal'
 import { UpscaleModal } from '@/components/modals/UpscaleModal'
-import type { Project, Output, Message, WorkflowStep, GeneratedImage, VisualConcept, ContentType } from '@/types'
+import type { Project, Output, Message, WorkflowStep, GeneratedImage, VisualConcept, ContentType, CarouselSlide, CarouselTemplate } from '@/types'
 import { WORKFLOW_CONFIGS, STEP_LABELS } from '@/types'
+import { CarouselEditor, TemplateImporter } from '@/components/carousel'
 
 interface ProjectData {
   project: Project
   messages: Message[]
   output: Output | null
   generatedImages: Omit<GeneratedImage, 'image_data'>[]
+}
+
+interface CarouselData {
+  id: string
+  slides: CarouselSlide[]
+  template_id?: string
 }
 
 export default function ProjectPage() {
@@ -74,12 +82,20 @@ export default function ProjectPage() {
   // Generating image index (for per-card loading state)
   const [generatingImageIndex, setGeneratingImageIndex] = useState<number | null>(null)
 
+  // Carousel state
+  const [carousel, setCarousel] = useState<CarouselData | null>(null)
+  const [carouselTemplate, setCarouselTemplate] = useState<CarouselTemplate | null>(null)
+  const [isCarouselLoading, setIsCarouselLoading] = useState(false)
+  const [showTemplateImporter, setShowTemplateImporter] = useState(false)
+
   // Track completed steps based on actual user selections
   const [completedSteps, setCompletedSteps] = useState<WorkflowStep[]>([])
 
-  // Calculate completed steps from output data
+  // Calculate completed steps from output data and current step
   useEffect(() => {
     const output = data?.output
+    const currentStep = data?.project?.current_step
+
     if (!output) {
       setCompletedSteps([])
       return
@@ -118,8 +134,19 @@ export default function ProjectPage() {
       completed.push('thumbnails')
     }
 
+    // Summary (complete): marked done when all prior workflow steps are completed
+    const platform = data?.project?.platform
+    if (platform) {
+      const config = WORKFLOW_CONFIGS[platform]
+      const requiredSteps = config.steps.filter(s => s !== 'complete')
+      const allPriorStepsComplete = requiredSteps.every(step => completed.includes(step))
+      if (allPriorStepsComplete) {
+        completed.push('complete')
+      }
+    }
+
     setCompletedSteps(completed)
-  }, [data?.output])
+  }, [data?.output, data?.project?.current_step, data?.project?.platform])
 
   // Fetch project data
   const fetchProject = useCallback(async () => {
@@ -130,6 +157,17 @@ export default function ProjectPage() {
       }
       const projectData = await response.json()
       setData(projectData)
+
+      // Fetch carousel data if it exists
+      try {
+        const carouselRes = await fetch(`/api/carousel/generate?project_id=${projectId}`)
+        if (carouselRes.ok) {
+          const carouselData = await carouselRes.json()
+          setCarousel(carouselData)
+        }
+      } catch {
+        // No carousel yet, that's fine
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load project')
     } finally {
@@ -267,13 +305,24 @@ export default function ProjectPage() {
     }
   }
 
-  // Send chat message
+  // Send chat message via assistant (tool-capable)
   const handleSendMessage = async (message: string) => {
     if (!data) return
 
+    // Optimistic update: show user message immediately
+    const tempId = `temp-${Date.now()}`
+    const tempUserMessage: Message = {
+      id: tempId,
+      project_id: projectId,
+      role: 'user',
+      content: message,
+      created_at: new Date().toISOString(),
+    }
+    setData(prev => prev ? { ...prev, messages: [...prev.messages, tempUserMessage] } : null)
     setIsChatLoading(true)
+
     try {
-      const response = await fetch('/api/chat', {
+      const response = await fetch('/api/assistant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ project_id: projectId, message }),
@@ -284,12 +333,37 @@ export default function ProjectPage() {
       }
 
       const result = await response.json()
-      setData(prev => prev ? {
-        ...prev,
-        messages: [...prev.messages, result.userMessage, result.assistantMessage]
-      } : null)
+
+      setData(prev => {
+        if (!prev) return null
+        // Replace temp message with real user message + add assistant message
+        const withoutTemp = prev.messages.filter(m => m.id !== tempId)
+        return {
+          ...prev,
+          messages: [...withoutTemp, result.userMessage, result.assistantMessage],
+          output: result.output || prev.output,
+        }
+      })
+
+      // If an image was generated/refined, refresh project data to update the images list
+      if (result.generatedImage) {
+        await fetchProject()
+      }
     } catch (err) {
       console.error('Chat error:', err)
+      // Show error in chat, remove temp user message
+      const errorMessage: Message = {
+        id: `error-${Date.now()}`,
+        project_id: projectId,
+        role: 'assistant',
+        content: 'Sorry, something went wrong. Please try again.',
+        created_at: new Date().toISOString(),
+      }
+      setData(prev => {
+        if (!prev) return null
+        const withoutTemp = prev.messages.filter(m => m.id !== tempId)
+        return { ...prev, messages: [...withoutTemp, tempUserMessage, errorMessage] }
+      })
     } finally {
       setIsChatLoading(false)
     }
@@ -437,6 +511,137 @@ export default function ProjectPage() {
     document.body.removeChild(link)
   }
 
+  // Carousel handlers
+  const handleGenerateCarousel = async () => {
+    setIsCarouselLoading(true)
+    try {
+      const response = await fetch('/api/carousel/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: projectId,
+          slide_count: 5,
+          template_id: carouselTemplate?.id
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to generate carousel')
+      }
+
+      const carouselData = await response.json()
+      setCarousel(carouselData)
+    } catch (err) {
+      console.error('Carousel generation error:', err)
+    } finally {
+      setIsCarouselLoading(false)
+    }
+  }
+
+  const handleUpdateCarouselSlides = async (slides: CarouselSlide[]) => {
+    if (!carousel) return
+
+    try {
+      const response = await fetch('/api/carousel/generate', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          carousel_id: carousel.id,
+          slides
+        })
+      })
+
+      if (response.ok) {
+        const updated = await response.json()
+        setCarousel(updated)
+      }
+    } catch (err) {
+      console.error('Failed to update carousel:', err)
+    }
+  }
+
+  const handleRenderCarousel = async () => {
+    if (!carousel) return
+
+    setIsCarouselLoading(true)
+    try {
+      const response = await fetch('/api/carousel/render', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: projectId,
+          carousel_id: carousel.id
+        })
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to render carousel')
+      }
+
+      const rendered = await response.json()
+      setCarousel(rendered)
+    } catch (err) {
+      console.error('Carousel render error:', err)
+    } finally {
+      setIsCarouselLoading(false)
+    }
+  }
+
+  const handleExportCarousel = async (format: 'pdf' | 'png-zip') => {
+    if (!carousel) return
+
+    setIsCarouselLoading(true)
+    try {
+      const response = await fetch('/api/export/carousel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: projectId,
+          carousel_id: carousel.id,
+          format
+        })
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to export carousel')
+      }
+
+      const result = await response.json()
+
+      // Download the file
+      const link = document.createElement('a')
+      link.href = `data:${result.mime_type};base64,${result.data}`
+      link.download = result.filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+    } catch (err) {
+      console.error('Carousel export error:', err)
+      alert(err instanceof Error ? err.message : 'Failed to export carousel')
+    } finally {
+      setIsCarouselLoading(false)
+    }
+  }
+
+  const handleTemplateImported = (template: CarouselTemplate) => {
+    setCarouselTemplate(template)
+    setShowTemplateImporter(false)
+  }
+
+  // Delete a generated image
+  const handleDeleteImage = async (image: GeneratedImage) => {
+    if (!confirm('Delete this thumbnail? This cannot be undone.')) return
+    try {
+      const response = await fetch(`/api/images/${image.id}`, { method: 'DELETE' })
+      if (response.ok) {
+        fetchProject()
+      }
+    } catch (err) {
+      console.error('Failed to delete image:', err)
+    }
+  }
+
   // View image in full screen lightbox
   const handleViewFullScreen = async (image: GeneratedImage, index: number) => {
     // Fetch full image data if needed
@@ -507,6 +712,7 @@ export default function ProjectPage() {
           project={project}
           output={output}
           onNavigateToStep={(step) => handleStepChange(step as WorkflowStep)}
+          generatedImages={data.generatedImages}
         />
       )
     }
@@ -536,6 +742,69 @@ export default function ProjectPage() {
       thumbnails: { items: output?.visual_concepts || [], originalItems: output?.visual_concepts_original || [], selectedIndex: output?.selected_visual_index || 0, indexKey: 'selected_visual_index', itemsKey: 'visual_concepts' },
     }
 
+    // For carousel step (check before sectionMap since carousel isn't in it)
+    if (currentStep === 'carousel') {
+      if (showTemplateImporter) {
+        return (
+          <TemplateImporter
+            projectId={projectId}
+            onImported={handleTemplateImported}
+            onCancel={() => setShowTemplateImporter(false)}
+          />
+        )
+      }
+
+      return (
+        <div className="space-y-4">
+          {/* Template selector */}
+          {!carousel && !carouselTemplate && (
+            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-4">
+              <p className="text-sm text-blue-800 dark:text-blue-200 mb-2">
+                Optional: Import a template from Canva for branded carousels
+              </p>
+              <button
+                onClick={() => setShowTemplateImporter(true)}
+                className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+              >
+                Import Template
+              </button>
+            </div>
+          )}
+
+          {carouselTemplate && (
+            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 mb-4 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-green-800 dark:text-green-200">
+                  Template: {carouselTemplate.name}
+                </p>
+                <p className="text-xs text-green-600 dark:text-green-400">
+                  {carouselTemplate.slide_count} slides
+                </p>
+              </div>
+              <button
+                onClick={() => setCarouselTemplate(null)}
+                className="text-sm text-green-600 hover:text-green-700"
+              >
+                Remove
+              </button>
+            </div>
+          )}
+
+          <CarouselEditor
+            projectId={projectId}
+            carousel={carousel}
+            template={carouselTemplate}
+            onUpdate={handleUpdateCarouselSlides}
+            onGenerate={handleGenerateCarousel}
+            onRender={handleRenderCarousel}
+            onExport={handleExportCarousel}
+            isLoading={isCarouselLoading}
+          />
+        </div>
+      )
+    }
+
+    // Get section data for other steps
     const section = sectionMap[currentStep]
     if (!section) return null
 
@@ -564,6 +833,7 @@ export default function ProjectPage() {
                 isGenerating={generatingImageIndex === index}
                 onRefine={matchingImage ? () => handleOpenRefineModal(matchingImage) : undefined}
                 onUpscale={matchingImage && !matchingImage.is_upscaled ? () => handleOpenUpscaleModal(matchingImage) : undefined}
+                onDelete={matchingImage ? () => handleDeleteImage(matchingImage) : undefined}
                 onDownload={matchingImage ? () => handleDownloadImage(matchingImage) : undefined}
                 onViewFullScreen={matchingImage ? () => handleViewFullScreen(matchingImage, index) : undefined}
                 onHistory={matchingImage ? () => handleOpenThumbnailHistory(matchingImage.id) : undefined}
@@ -761,6 +1031,11 @@ export default function ProjectPage() {
       <div className="flex-1 flex overflow-hidden">
         {/* Workflow Area */}
         <div className="flex-1 flex flex-col min-w-0">
+          {/* Context Panel - relative z-10 ensures it stays above other content */}
+          <div className="px-6 pt-4 flex-shrink-0 relative z-10">
+            <ContextPanel projectId={projectId} />
+          </div>
+
           <StepContainer
             currentStep={project.current_step}
             platform={project.platform}

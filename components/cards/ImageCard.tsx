@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Image from 'next/image'
 import { Check, Download, Expand, RefreshCw, Sparkles, Trash2, Eye, Copy, Clock } from 'lucide-react'
+import { Tooltip } from '@/components/ui/Tooltip'
 import type { GeneratedImage, VisualConcept } from '@/types'
 
 interface ImageCardProps {
@@ -155,83 +156,91 @@ export function ImageCard({
       {hasImage && (
         <div className="absolute bottom-3 right-3 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
           {showPrompt && (
-            <button
-              onClick={() => setShowPromptModal(true)}
-              className="p-1.5 bg-black/50 text-white rounded-lg hover:bg-black/70 transition-colors"
-              title="View prompt"
-            >
-              <Eye className="w-4 h-4" />
-            </button>
+            <Tooltip text="View prompt">
+              <button
+                onClick={() => setShowPromptModal(true)}
+                className="p-1.5 bg-black/50 text-white rounded-lg hover:bg-black/70 transition-colors"
+              >
+                <Eye className="w-4 h-4" />
+              </button>
+            </Tooltip>
           )}
 
           {onViewFullScreen && (
-            <button
-              onClick={onViewFullScreen}
-              className="p-1.5 bg-black/50 text-white rounded-lg hover:bg-black/70 transition-colors"
-              title="View full screen"
-            >
-              <Expand className="w-4 h-4" />
-            </button>
+            <Tooltip text="View full screen">
+              <button
+                onClick={onViewFullScreen}
+                className="p-1.5 bg-black/50 text-white rounded-lg hover:bg-black/70 transition-colors"
+              >
+                <Expand className="w-4 h-4" />
+              </button>
+            </Tooltip>
           )}
 
           {image?.image_data && (
-            <button
-              onClick={handleCopy}
-              className="p-1.5 bg-black/50 text-white rounded-lg hover:bg-black/70 transition-colors"
-              title="Copy to clipboard"
-            >
-              {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
-            </button>
+            <Tooltip text={copied ? "Copied!" : "Copy to clipboard"}>
+              <button
+                onClick={handleCopy}
+                className="p-1.5 bg-black/50 text-white rounded-lg hover:bg-black/70 transition-colors"
+              >
+                {copied ? <Check className="w-4 h-4 text-green-400" /> : <Copy className="w-4 h-4" />}
+              </button>
+            </Tooltip>
           )}
 
           {onRefine && (
-            <button
-              onClick={onRefine}
-              className="p-1.5 bg-black/50 text-white rounded-lg hover:bg-black/70 transition-colors"
-              title="Refine image"
-            >
-              <Sparkles className="w-4 h-4" />
-            </button>
+            <Tooltip text="Refine image">
+              <button
+                onClick={onRefine}
+                className="p-1.5 bg-black/50 text-white rounded-lg hover:bg-black/70 transition-colors"
+              >
+                <Sparkles className="w-4 h-4" />
+              </button>
+            </Tooltip>
           )}
 
           {onHistory && (
-            <button
-              onClick={onHistory}
-              className="p-1.5 bg-black/50 text-white rounded-lg hover:bg-black/70 transition-colors"
-              title="View history"
-            >
-              <Clock className="w-4 h-4" />
-            </button>
+            <Tooltip text="View history">
+              <button
+                onClick={onHistory}
+                className="p-1.5 bg-black/50 text-white rounded-lg hover:bg-black/70 transition-colors"
+              >
+                <Clock className="w-4 h-4" />
+              </button>
+            </Tooltip>
           )}
 
           {onUpscale && !image?.is_upscaled && (
-            <button
-              onClick={onUpscale}
-              className="p-1.5 bg-black/50 text-white rounded-lg hover:bg-black/70 transition-colors"
-              title="Upscale to 4K"
-            >
-              <span className="text-xs font-bold">4K</span>
-            </button>
+            <Tooltip text="Upscale to 4K">
+              <button
+                onClick={onUpscale}
+                className="p-1.5 bg-black/50 text-white rounded-lg hover:bg-black/70 transition-colors"
+              >
+                <span className="text-xs font-bold">4K</span>
+              </button>
+            </Tooltip>
           )}
 
           {onDownload && (
-            <button
-              onClick={onDownload}
-              className="p-1.5 bg-black/50 text-white rounded-lg hover:bg-black/70 transition-colors"
-              title="Download"
-            >
-              <Download className="w-4 h-4" />
-            </button>
+            <Tooltip text="Download">
+              <button
+                onClick={onDownload}
+                className="p-1.5 bg-black/50 text-white rounded-lg hover:bg-black/70 transition-colors"
+              >
+                <Download className="w-4 h-4" />
+              </button>
+            </Tooltip>
           )}
 
           {onDelete && (
-            <button
-              onClick={onDelete}
-              className="p-1.5 bg-black/50 text-white rounded-lg hover:bg-red-600 transition-colors"
-              title="Delete"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
+            <Tooltip text="Delete thumbnail">
+              <button
+                onClick={onDelete}
+                className="p-1.5 bg-black/50 text-white rounded-lg hover:bg-red-600 transition-colors"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </Tooltip>
           )}
         </div>
       )}

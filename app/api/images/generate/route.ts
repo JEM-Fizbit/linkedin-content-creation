@@ -55,11 +55,29 @@ export async function POST(request: NextRequest) {
       aspectRatio = '3:4'
     }
 
+    // Fetch reference images from project assets for multimodal generation
+    let referenceImages: { base64Data: string; mimeType: string }[] | undefined
+    try {
+      const assetsStmt = db.prepare(
+        "SELECT data, mime_type FROM project_assets WHERE project_id = ? AND type IN ('reference_image', 'logo', 'icon')"
+      )
+      const refs = assetsStmt.all(project_id) as { data: Buffer; mime_type: string }[]
+      if (refs.length > 0) {
+        referenceImages = refs.map(r => ({
+          base64Data: r.data.toString('base64'),
+          mimeType: r.mime_type,
+        }))
+      }
+    } catch (err) {
+      console.error('Failed to load reference images:', err)
+    }
+
     // Generate the image
     const results = await generateImage({
       prompt,
       aspectRatio,
       numberOfImages: 1,
+      referenceImages,
     })
 
     if (results.length === 0) {

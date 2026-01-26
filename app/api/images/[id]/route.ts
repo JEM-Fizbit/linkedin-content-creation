@@ -7,9 +7,12 @@ interface RouteParams {
 }
 
 // GET /api/images/:id - Get a specific generated image with its data
+// Use ?format=image to get raw image bytes instead of JSON
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
+    const { searchParams } = new URL(request.url)
+    const format = searchParams.get('format')
 
     const stmt = db.prepare(`
       SELECT id, project_id, prompt, image_data, width, height, model, is_upscaled, parent_image_id, created_at
@@ -35,6 +38,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         { error: 'Image not found' },
         { status: 404 }
       )
+    }
+
+    // Return raw image bytes if format=image
+    if (format === 'image' && row.image_data) {
+      return new NextResponse(new Uint8Array(row.image_data), {
+        headers: {
+          'Content-Type': 'image/png',
+          'Cache-Control': 'public, max-age=31536000, immutable',
+        },
+      })
     }
 
     const image: GeneratedImage = {

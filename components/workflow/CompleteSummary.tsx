@@ -1,14 +1,15 @@
 'use client'
 
 import { useState } from 'react'
-import { Check, ChevronDown, ChevronUp, Copy, ExternalLink, Image, FileText, MessageCircle, Target, Sparkles, Globe, Download } from 'lucide-react'
-import type { Project, Output, VisualConcept, Citation, Platform } from '@/types'
+import { Check, ChevronDown, ChevronUp, Copy, ExternalLink, Image, FileText, MessageCircle, Target, Sparkles, Globe, Download, LayoutGrid } from 'lucide-react'
+import type { Project, Output, VisualConcept, Citation, Platform, GeneratedImage } from '@/types'
 import { WORKFLOW_CONFIGS, STEP_LABELS } from '@/types'
 
 interface CompleteSummaryProps {
   project: Project
   output: Output
   onNavigateToStep: (step: string) => void
+  generatedImages?: Omit<GeneratedImage, 'image_data'>[]
 }
 
 interface SectionProps {
@@ -62,9 +63,19 @@ function Section({ title, icon, children, defaultExpanded = false, onEdit }: Sec
   )
 }
 
-export function CompleteSummary({ project, output, onNavigateToStep }: CompleteSummaryProps) {
+export function CompleteSummary({ project, output, onNavigateToStep, generatedImages = [] }: CompleteSummaryProps) {
   const [copiedField, setCopiedField] = useState<string | null>(null)
   const config = WORKFLOW_CONFIGS[project.platform]
+
+  // Find the generated image for the selected visual concept
+  const selectedVisualImage = (() => {
+    const selectedVisual = output.visual_concepts[output.selected_visual_index]
+    if (!selectedVisual) return null
+    return generatedImages.find(
+      img => img.prompt === selectedVisual.description ||
+             img.prompt?.includes(selectedVisual.description?.substring(0, 50) || '')
+    )
+  })()
 
   const handleCopy = async (text: string, field: string) => {
     await navigator.clipboard.writeText(text)
@@ -89,7 +100,7 @@ export function CompleteSummary({ project, output, onNavigateToStep }: CompleteS
           <Check className="w-8 h-8 text-green-600 dark:text-green-400" />
         </div>
         <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-          Project Complete!
+          Content Ready!
         </h2>
         <p className="text-gray-500 dark:text-gray-400">
           Your {project.platform} content is ready. Review and export below.
@@ -254,19 +265,29 @@ export function CompleteSummary({ project, output, onNavigateToStep }: CompleteS
           title={isYouTube ? 'Selected Thumbnail' : 'Selected Visual'}
           icon={<Image className="w-5 h-5" />}
           onEdit={() => onNavigateToStep(isYouTube ? 'thumbnails' : 'visuals')}
+          defaultExpanded
         >
-          {selectedVisual ? (
+          {selectedVisualImage ? (
+            <div className="space-y-3">
+              <div className="relative aspect-square max-w-md mx-auto rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700">
+                <img
+                  src={`/api/images/${selectedVisualImage.id}?format=image`}
+                  alt={selectedVisual?.description || 'Generated visual'}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              {selectedVisual?.description && (
+                <p className="text-sm text-gray-500 dark:text-gray-400 text-center italic">
+                  {selectedVisual.description}
+                </p>
+              )}
+            </div>
+          ) : selectedVisual ? (
             <div className="space-y-3">
               <p className="text-gray-700 dark:text-gray-300">{selectedVisual.description}</p>
-              {selectedVisual.preview_data && (
-                <div className="relative aspect-video rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-700">
-                  <img
-                    src={selectedVisual.preview_data}
-                    alt="Visual concept"
-                    className="w-full h-full object-cover"
-                  />
-                </div>
-              )}
+              <p className="text-sm text-gray-500 dark:text-gray-400 italic">
+                No image generated yet. <button onClick={() => onNavigateToStep(isYouTube ? 'thumbnails' : 'visuals')} className="text-blue-600 hover:underline">Generate one</button>
+              </p>
             </div>
           ) : (
             <p className="text-gray-500 dark:text-gray-400 italic">No visual selected</p>
@@ -318,6 +339,17 @@ export function CompleteSummary({ project, output, onNavigateToStep }: CompleteS
           {copiedField === 'all' ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
           {copiedField === 'all' ? 'Copied!' : 'Copy All Text'}
         </button>
+
+        {/* Create Carousel - only for LinkedIn/Facebook */}
+        {!isYouTube && (
+          <button
+            onClick={() => onNavigateToStep('carousel')}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 transition-colors"
+          >
+            <LayoutGrid className="w-4 h-4" />
+            Create Carousel
+          </button>
+        )}
       </div>
     </div>
   )

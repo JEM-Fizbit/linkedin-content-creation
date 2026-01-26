@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import db from '@/lib/db'
 import { generateId, safeJsonParse } from '@/lib/utils'
 import anthropic, { SYSTEM_PROMPT, CONTENT_GENERATION_PROMPT, isConfigured } from '@/lib/claude'
+import { composeSystemPrompt } from '@/lib/prompts/compose'
 import { isSearchConfigured, conductResearch, buildResearchContext, formatResearchForPrompt } from '@/lib/search'
 import type { Output, Message, VisualConcept, Project, Session, Platform, Citation, ResearchContext, SearchResult } from '@/types'
 
@@ -342,8 +343,8 @@ function getProjectSearchSettings(projectId: string): { enabled: boolean; provid
     // Table might not exist or other error, use defaults
   }
 
-  // Default: web search enabled with Claude provider
-  return { enabled: true, provider: 'claude', maxSearches: 5 }
+  // Default: web search disabled (can cause timeouts)
+  return { enabled: false, provider: 'claude', maxSearches: 5 }
 }
 
 // Generate structured content using Claude API with optional web search
@@ -391,6 +392,45 @@ async function generateStructuredContent(
     contextDesc += `\nContent style/tone: ${contextInfo.contentStyle}`
   }
 
+  // Add uploaded text sources if available
+  if (projectId) {
+    try {
+      const sourcesStmt = db.prepare(
+        'SELECT title, content FROM project_sources WHERE project_id = ? AND enabled = 1 ORDER BY created_at ASC'
+      )
+      const sources = sourcesStmt.all(projectId) as { title: string; content: string }[]
+
+      if (sources.length > 0) {
+        let totalChars = 0
+        const MAX_CHARS = 8000
+        contextDesc += '\n\n--- Reference Materials ---\n'
+        contextDesc += 'Use these sources to inform your content:\n\n'
+        for (const source of sources) {
+          const available = MAX_CHARS - totalChars
+          if (available <= 0) break
+          const content = source.content.length > available
+            ? source.content.substring(0, available) + '...[truncated]'
+            : source.content
+          contextDesc += `### ${source.title}\n${content}\n\n`
+          totalChars += content.length
+        }
+      }
+
+      const assetsStmt = db.prepare(
+        'SELECT type, filename FROM project_assets WHERE project_id = ?'
+      )
+      const assets = assetsStmt.all(projectId) as { type: string; filename: string }[]
+      if (assets.length > 0) {
+        contextDesc += '\n\n--- Visual References ---\n'
+        contextDesc += 'Reference images provided: '
+        contextDesc += assets.map(a => `${a.filename} (${a.type.replace('_', ' ')})`).join(', ')
+        contextDesc += '\nUse their style/branding in visual concept descriptions.\n'
+      }
+    } catch (err) {
+      console.error('Failed to load project sources:', err)
+    }
+  }
+
   // Add research context if available
   if (researchContext) {
     contextDesc += formatResearchForPrompt(researchContext)
@@ -424,7 +464,7 @@ For ${contextInfo.platform === 'youtube' ? 'YouTube content, focus on intros, ti
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
     max_tokens: 2048,
-    system: SYSTEM_PROMPT,
+    system: composeSystemPrompt(SYSTEM_PROMPT, contextInfo.platform),
     messages: [{ role: 'user', content: prompt }]
   })
 

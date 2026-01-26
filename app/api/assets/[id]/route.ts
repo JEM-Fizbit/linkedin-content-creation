@@ -7,9 +7,12 @@ interface RouteParams {
 }
 
 // GET /api/assets/:id - Get a specific asset with its data
+// Use ?format=image to get raw image bytes (for <img> src)
 export async function GET(request: NextRequest, { params }: RouteParams) {
   try {
     const { id } = await params
+    const { searchParams } = new URL(request.url)
+    const format = searchParams.get('format')
 
     const stmt = db.prepare(`
       SELECT id, project_id, type, filename, mime_type, data, created_at
@@ -32,6 +35,16 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
         { error: 'Asset not found' },
         { status: 404 }
       )
+    }
+
+    // Return raw image data for <img> tags
+    if (format === 'image') {
+      return new NextResponse(new Uint8Array(row.data), {
+        headers: {
+          'Content-Type': row.mime_type,
+          'Cache-Control': 'public, max-age=3600',
+        },
+      })
     }
 
     const asset: ProjectAsset = {

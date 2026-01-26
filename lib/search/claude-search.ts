@@ -43,15 +43,28 @@ Provide a comprehensive summary of your findings.`
     ...(options.blockedDomains && { blocked_domains: options.blockedDomains }),
   } as const
 
-  const response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 2048,
-    messages: [{ role: 'user', content: searchPrompt }],
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    tools: [webSearchTool as any]
-  })
+  // Create with timeout to prevent indefinite hanging
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 60000) // 60 second timeout
 
-  return parseClaudeSearchResponse(response, query)
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 2048,
+      messages: [{ role: 'user', content: searchPrompt }],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tools: [webSearchTool as any]
+    }, { signal: controller.signal })
+
+    clearTimeout(timeout)
+    return parseClaudeSearchResponse(response, query)
+  } catch (error) {
+    clearTimeout(timeout)
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Web search timed out after 60 seconds')
+    }
+    throw error
+  }
 }
 
 /**
@@ -148,20 +161,33 @@ export async function generateWithSearch(
     ...(options.blockedDomains && { blocked_domains: options.blockedDomains }),
   } as const
 
-  const response = await anthropic.messages.create({
-    model: 'claude-sonnet-4-20250514',
-    max_tokens: 4096,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: prompt }],
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    tools: [webSearchTool as any]
-  })
+  // Create with timeout to prevent indefinite hanging
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 60000) // 60 second timeout
 
-  const parsed = parseClaudeSearchResponse(response, prompt)
+  try {
+    const response = await anthropic.messages.create({
+      model: 'claude-sonnet-4-20250514',
+      max_tokens: 4096,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: prompt }],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tools: [webSearchTool as any]
+    }, { signal: controller.signal })
 
-  return {
-    content: parsed.summary || '',
-    citations: parsed.citations,
-    searchResults: parsed.results,
+    clearTimeout(timeout)
+    const parsed = parseClaudeSearchResponse(response, prompt)
+
+    return {
+      content: parsed.summary || '',
+      citations: parsed.citations,
+      searchResults: parsed.results,
+    }
+  } catch (error) {
+    clearTimeout(timeout)
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('Web search generation timed out after 60 seconds')
+    }
+    throw error
   }
 }

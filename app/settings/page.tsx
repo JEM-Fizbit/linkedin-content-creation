@@ -2,35 +2,68 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { ArrowLeft, Save, RotateCcw, Loader2, Check } from 'lucide-react'
+import { ArrowLeft, Save, RotateCcw, Loader2, Check, ChevronDown } from 'lucide-react'
 import type { Setting, SettingKey } from '@/types'
 
-const PROMPT_LABELS: Record<SettingKey, { label: string; description: string }> = {
-  hooks_agent_prompt: {
+const VOICE_STYLE_PROMPTS: { key: SettingKey; label: string; description: string; rows: number }[] = [
+  {
+    key: 'master_voice_prompt',
+    label: 'Master Voice & Style',
+    description: 'Your universal writing DNA — applied to ALL content across every platform',
+    rows: 10,
+  },
+  {
+    key: 'linkedin_tone_prompt',
+    label: 'LinkedIn Tone',
+    description: 'Platform-specific tone modifier layered on top of your master voice for LinkedIn content',
+    rows: 6,
+  },
+  {
+    key: 'youtube_tone_prompt',
+    label: 'YouTube Tone',
+    description: 'Platform-specific tone modifier layered on top of your master voice for YouTube content',
+    rows: 6,
+  },
+  {
+    key: 'facebook_tone_prompt',
+    label: 'Facebook Tone',
+    description: 'Platform-specific tone modifier layered on top of your master voice for Facebook content',
+    rows: 6,
+  },
+]
+
+const AGENT_PROMPTS: { key: SettingKey; label: string; description: string }[] = [
+  {
+    key: 'hooks_agent_prompt',
     label: 'Hooks Agent',
-    description: 'System prompt for generating attention-grabbing opening lines'
+    description: 'System prompt for generating attention-grabbing opening lines',
   },
-  body_agent_prompt: {
+  {
+    key: 'body_agent_prompt',
     label: 'Body Content Agent',
-    description: 'System prompt for generating main content body'
+    description: 'System prompt for generating main content body',
   },
-  intros_agent_prompt: {
+  {
+    key: 'intros_agent_prompt',
     label: 'Intros Agent',
-    description: 'System prompt for generating video introduction scripts'
+    description: 'System prompt for generating video introduction scripts',
   },
-  titles_agent_prompt: {
+  {
+    key: 'titles_agent_prompt',
     label: 'Titles Agent',
-    description: 'System prompt for generating optimized titles'
+    description: 'System prompt for generating optimized titles',
   },
-  ctas_agent_prompt: {
+  {
+    key: 'ctas_agent_prompt',
     label: 'CTAs Agent',
-    description: 'System prompt for generating calls-to-action'
+    description: 'System prompt for generating calls-to-action',
   },
-  thumbnails_agent_prompt: {
+  {
+    key: 'thumbnails_agent_prompt',
     label: 'Thumbnails Agent',
-    description: 'System prompt for generating thumbnail concepts'
+    description: 'System prompt for generating thumbnail concepts',
   },
-}
+]
 
 export default function SettingsPage() {
   const router = useRouter()
@@ -39,7 +72,17 @@ export default function SettingsPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState<Record<string, boolean>>({})
   const [savedKeys, setSavedKeys] = useState<Set<string>>(new Set())
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set())
   const [error, setError] = useState<string | null>(null)
+
+  const toggleExpanded = (key: string) => {
+    setExpandedKeys(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
 
   // Fetch settings
   useEffect(() => {
@@ -164,81 +207,208 @@ export default function SettingsPage() {
           </div>
         )}
 
-        <div className="space-y-6">
-          {Object.entries(PROMPT_LABELS).map(([key, { label, description }]) => {
-            const settingKey = key as SettingKey
-            const value = editedValues[settingKey] || ''
-            const modified = isModified(settingKey)
-            const saving = isSaving[settingKey]
-            const saved = savedKeys.has(settingKey)
+        {/* Voice & Style Section */}
+        <div className="mb-8">
+          <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-1">Voice & Style</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+            Define your writing voice and platform-specific tones. These are layered into every generation call.
+          </p>
+          <div className="space-y-3">
+            {VOICE_STYLE_PROMPTS.map(({ key, label, description, rows }) => {
+              const value = editedValues[key] || ''
+              const modified = isModified(key)
+              const saving = isSaving[key]
+              const saved = savedKeys.has(key)
+              const expanded = expandedKeys.has(key)
+              const preview = value.replace(/\n/g, ' ').slice(0, 80) + (value.length > 80 ? '...' : '')
 
-            return (
-              <div
-                key={key}
-                className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
-              >
-                <div className="p-6 border-b border-gray-200 dark:border-gray-700">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="font-semibold text-gray-900 dark:text-white">
-                        {label}
-                      </h3>
-                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                        {description}
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      {saved && (
-                        <span className="flex items-center gap-1 text-green-600 dark:text-green-400 text-sm">
-                          <Check className="w-4 h-4" />
-                          Saved
-                        </span>
-                      )}
-
-                      <button
-                        onClick={() => handleReset(settingKey)}
-                        disabled={saving}
-                        className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-1.5"
-                        title="Reset to default"
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                        Reset
-                      </button>
-
-                      <button
-                        onClick={() => handleSave(settingKey)}
-                        disabled={saving || !modified}
-                        className={`
-                          px-4 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5
-                          ${modified
-                            ? 'bg-blue-600 text-white hover:bg-blue-700'
-                            : 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
-                          }
-                        `}
-                      >
-                        {saving ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          <Save className="w-4 h-4" />
+              return (
+                <div
+                  key={key}
+                  className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
+                >
+                  <div
+                    className="px-6 py-4 cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+                    onClick={() => toggleExpanded(key)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-semibold text-gray-900 dark:text-white">
+                            {label}
+                          </h3>
+                          {modified && (
+                            <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" title="Unsaved changes" />
+                          )}
+                          {saved && (
+                            <span className="flex items-center gap-1 text-green-600 dark:text-green-400 text-xs">
+                              <Check className="w-3 h-3" />
+                              Saved
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                          {description}
+                        </p>
+                        {!expanded && (
+                          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5 font-mono truncate">
+                            {preview}
+                          </p>
                         )}
-                        Save
-                      </button>
+                      </div>
+                      <ChevronDown
+                        className={`w-5 h-5 text-gray-400 flex-shrink-0 ml-4 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
+                      />
                     </div>
                   </div>
-                </div>
 
-                <div className="p-6">
-                  <textarea
-                    value={value}
-                    onChange={(e) => setEditedValues(prev => ({ ...prev, [settingKey]: e.target.value }))}
-                    rows={8}
-                    className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none font-mono text-sm"
-                  />
+                  {expanded && (
+                    <div className="px-6 pb-5 border-t border-gray-100 dark:border-gray-700">
+                      <textarea
+                        value={value}
+                        onChange={(e) => setEditedValues(prev => ({ ...prev, [key]: e.target.value }))}
+                        rows={rows}
+                        className="w-full mt-4 px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none font-mono text-sm"
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <div className="flex items-center justify-end gap-2 mt-3">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleReset(key) }}
+                          disabled={saving}
+                          className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-1.5"
+                          title="Reset to default"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                          Reset
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleSave(key) }}
+                          disabled={saving || !modified}
+                          className={`
+                            px-4 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5
+                            ${modified
+                              ? 'bg-blue-600 text-white hover:bg-blue-700'
+                              : 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
+                            }
+                          `}
+                        >
+                          {saving ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Save className="w-4 h-4" />
+                          )}
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            )
-          })}
+              )
+            })}
+          </div>
+        </div>
+
+        <hr className="border-gray-200 dark:border-gray-700 my-8" />
+
+        {/* Section Agent Prompts */}
+        <div>
+          <h2 className="text-lg font-bold text-gray-900 dark:text-white mb-1">Section Agent Prompts</h2>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+            Expert instructions for each content section. Applied when regenerating specific sections.
+          </p>
+          <div className="space-y-3">
+            {AGENT_PROMPTS.map(({ key, label, description }) => {
+              const value = editedValues[key] || ''
+              const modified = isModified(key)
+              const saving = isSaving[key]
+              const saved = savedKeys.has(key)
+              const expanded = expandedKeys.has(key)
+              const preview = value.replace(/\n/g, ' ').slice(0, 80) + (value.length > 80 ? '...' : '')
+
+              return (
+                <div
+                  key={key}
+                  className="bg-white dark:bg-gray-800 rounded-2xl border border-gray-200 dark:border-gray-700 overflow-hidden"
+                >
+                  <div
+                    className="px-6 py-4 cursor-pointer select-none hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+                    onClick={() => toggleExpanded(key)}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-semibold text-gray-900 dark:text-white">
+                            {label}
+                          </h3>
+                          {modified && (
+                            <span className="w-2 h-2 rounded-full bg-blue-500 flex-shrink-0" title="Unsaved changes" />
+                          )}
+                          {saved && (
+                            <span className="flex items-center gap-1 text-green-600 dark:text-green-400 text-xs">
+                              <Check className="w-3 h-3" />
+                              Saved
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
+                          {description}
+                        </p>
+                        {!expanded && (
+                          <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5 font-mono truncate">
+                            {preview}
+                          </p>
+                        )}
+                      </div>
+                      <ChevronDown
+                        className={`w-5 h-5 text-gray-400 flex-shrink-0 ml-4 transition-transform duration-200 ${expanded ? 'rotate-180' : ''}`}
+                      />
+                    </div>
+                  </div>
+
+                  {expanded && (
+                    <div className="px-6 pb-5 border-t border-gray-100 dark:border-gray-700">
+                      <textarea
+                        value={value}
+                        onChange={(e) => setEditedValues(prev => ({ ...prev, [key]: e.target.value }))}
+                        rows={8}
+                        className="w-full mt-4 px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none font-mono text-sm"
+                        onClick={(e) => e.stopPropagation()}
+                      />
+                      <div className="flex items-center justify-end gap-2 mt-3">
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleReset(key) }}
+                          disabled={saving}
+                          className="px-3 py-1.5 text-sm text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors flex items-center gap-1.5"
+                          title="Reset to default"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                          Reset
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handleSave(key) }}
+                          disabled={saving || !modified}
+                          className={`
+                            px-4 py-1.5 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5
+                            ${modified
+                              ? 'bg-blue-600 text-white hover:bg-blue-700'
+                              : 'bg-gray-100 dark:bg-gray-700 text-gray-400 cursor-not-allowed'
+                            }
+                          `}
+                        >
+                          {saving ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Save className="w-4 h-4" />
+                          )}
+                          Save
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </div>
       </main>
     </div>

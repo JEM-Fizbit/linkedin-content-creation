@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import db from '@/lib/db'
 import { generateId } from '@/lib/utils'
-import { refineImage, isConfigured } from '@/lib/gemini'
+import { refineImage, isConfigured, type ReferenceImage } from '@/lib/gemini'
 import type { GeneratedImage, RefineImageRequest } from '@/types'
 
 // POST /api/images/refine - Refine an existing image with a new prompt
@@ -51,11 +51,29 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Refine the image with the new prompt
+    // Fetch reference images for this project (if any)
+    let referenceImages: ReferenceImage[] | undefined
+    try {
+      const assetsStmt = db.prepare(
+        "SELECT data, mime_type FROM project_assets WHERE project_id = ? AND type IN ('reference_image', 'logo', 'icon')"
+      )
+      const refs = assetsStmt.all(originalImage.project_id) as { data: Buffer; mime_type: string }[]
+      if (refs.length > 0) {
+        referenceImages = refs.map(r => ({
+          base64Data: r.data.toString('base64'),
+          mimeType: r.mime_type,
+        }))
+      }
+    } catch (err) {
+      console.error('Failed to load reference images for refinement:', err)
+    }
+
+    // Refine the image with the new prompt, original image, and reference images
     const results = await refineImage(
       originalImage.prompt,
       refinement_prompt,
-      originalImage.image_data ? originalImage.image_data.toString('base64') : undefined
+      originalImage.image_data ? originalImage.image_data.toString('base64') : undefined,
+      referenceImages
     )
 
     if (results.length === 0) {
@@ -105,8 +123,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(generatedImage, { status: 201 })
   } catch (error) {
     console.error('Error refining image:', error)
+    const message = error instanceof Error ? error.message : 'Failed to refine image'
     return NextResponse.json(
-      { error: 'Failed to refine image' },
+      { error: message },
       { status: 500 }
     )
   }

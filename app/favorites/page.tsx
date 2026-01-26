@@ -375,7 +375,7 @@ export default function FavoritesPage() {
                 No results found
               </h3>
               <p className="text-light-text-secondary dark:text-dark-text-secondary mb-4 max-w-sm mx-auto">
-                No favorites match your search for "{searchQuery}". Try a different search term.
+                No favorites match your search for &quot;{searchQuery}&quot;. Try a different search term.
               </p>
               <button
                 onClick={() => setSearchQuery('')}

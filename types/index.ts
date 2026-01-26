@@ -5,7 +5,7 @@
 export type Platform = 'linkedin' | 'youtube' | 'facebook'
 export type ProjectStatus = 'in_progress' | 'complete' | 'published'
 export type SessionStatus = ProjectStatus // Alias for backward compatibility
-export type WorkflowStep = 'hooks' | 'body' | 'intros' | 'titles' | 'ctas' | 'visuals' | 'thumbnails' | 'complete'
+export type WorkflowStep = 'hooks' | 'body' | 'intros' | 'titles' | 'ctas' | 'visuals' | 'thumbnails' | 'carousel' | 'complete'
 
 // ============================================
 // Project Types (New)
@@ -144,6 +144,35 @@ export interface UploadAssetRequest {
 }
 
 // ============================================
+// Project Source Types (Text Context)
+// ============================================
+
+export type SourceType = 'text' | 'file' | 'url'
+
+export interface ProjectSource {
+  id: string
+  project_id: string
+  type: SourceType
+  title: string
+  content: string
+  original_filename?: string
+  original_url?: string
+  mime_type?: string
+  enabled: boolean
+  created_at: string
+}
+
+export interface CreateSourceRequest {
+  project_id: string
+  type: SourceType
+  title: string
+  content: string
+  original_filename?: string
+  original_url?: string
+  mime_type?: string
+}
+
+// ============================================
 // Generated Image Types
 // ============================================
 
@@ -211,6 +240,10 @@ export interface Setting {
 }
 
 export type SettingKey =
+  | 'master_voice_prompt'
+  | 'linkedin_tone_prompt'
+  | 'youtube_tone_prompt'
+  | 'facebook_tone_prompt'
   | 'hooks_agent_prompt'
   | 'body_agent_prompt'
   | 'intros_agent_prompt'
@@ -311,12 +344,20 @@ export interface ChatResponse {
 // AI Assistant Action Types
 // ============================================
 
+export type CarouselSlideField = 'headline' | 'body' | 'cta' | 'visual_prompt'
+
 export type AssistantAction =
   | { type: 'edit_card'; content_type: ContentType; index: number; new_content: string }
   | { type: 'remove_card'; content_type: ContentType; index: number }
   | { type: 'select_card'; content_type: ContentType; index: number }
   | { type: 'regenerate_section'; content_type: ContentType }
   | { type: 'add_more'; content_type: ContentType }
+  | { type: 'generate_image'; prompt: string; use_references: boolean; aspect_ratio: string }
+  | { type: 'refine_image'; image_id: string; refinement_prompt: string; use_references: boolean }
+  // Carousel-specific actions
+  | { type: 'edit_carousel_slide'; slide_index: number; field: CarouselSlideField; value: string }
+  | { type: 'set_slide_image'; slide_index: number; asset_id: string }
+  | { type: 'remove_slide_image'; slide_index: number }
 
 export interface AssistantResponse {
   message: string
@@ -385,7 +426,8 @@ export const STEP_LABELS: Record<WorkflowStep, string> = {
   ctas: 'Call to Action',
   visuals: 'Visual Concepts',
   thumbnails: 'Thumbnails',
-  complete: 'Complete'
+  carousel: 'Carousel',
+  complete: 'Summary'
 }
 
 // ============================================
@@ -450,4 +492,89 @@ export interface ResearchResponse {
   project_id: string
   searchResult: SearchResult
   researchContext: ResearchContext
+}
+
+// ============================================
+// Carousel Types
+// ============================================
+
+export interface TextZone {
+  id: string
+  type: 'headline' | 'body' | 'cta'
+  x: number
+  y: number
+  width: number
+  height: number
+  fontSize: number
+  fontFamily?: string
+  fontWeight?: 'normal' | 'bold'
+  color: string
+  textAlign?: 'left' | 'center' | 'right'
+  lineHeight?: number
+}
+
+export interface CarouselTemplateSlide {
+  id: string
+  template_id: string
+  position: number
+  background_data?: string // Base64 encoded image
+  text_zones: TextZone[]
+}
+
+export interface CarouselTemplate {
+  id: string
+  project_id: string
+  name: string
+  slide_count: number
+  slides: CarouselTemplateSlide[]
+  created_at: string
+}
+
+export interface CarouselSlide {
+  id: string
+  position: number
+  headline: string
+  body?: string
+  cta?: string
+  image_id?: string // Reference to generated_images.id
+  visual_prompt?: string // For AI image generation
+  background_color?: string
+  rendered_image?: string // Base64 of final rendered slide
+}
+
+export interface CarouselOutput {
+  id: string
+  project_id: string
+  template_id?: string
+  slides: CarouselSlide[]
+  created_at: string
+  updated_at: string
+}
+
+export interface ImportTemplateRequest {
+  project_id: string
+  name: string
+  files: Array<{
+    filename: string
+    data: string // Base64 encoded
+    mime_type: string
+  }>
+}
+
+export interface GenerateCarouselRequest {
+  project_id: string
+  slide_count?: number
+  template_id?: string
+  source_content?: string // Body content to break into slides
+}
+
+export interface RenderCarouselRequest {
+  project_id: string
+  carousel_id: string
+}
+
+export interface ExportCarouselRequest {
+  project_id: string
+  carousel_id: string
+  format: 'pdf' | 'png-zip'
 }

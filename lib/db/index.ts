@@ -25,7 +25,7 @@ db.exec(`
     content_style TEXT NOT NULL DEFAULT '',
     platform TEXT NOT NULL DEFAULT 'linkedin' CHECK (platform IN ('linkedin', 'youtube', 'facebook')),
     status TEXT NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'complete', 'published')),
-    current_step TEXT NOT NULL DEFAULT 'hooks' CHECK (current_step IN ('hooks', 'body', 'intros', 'titles', 'ctas', 'visuals', 'thumbnails', 'complete')),
+    current_step TEXT NOT NULL DEFAULT 'hooks' CHECK (current_step IN ('hooks', 'body', 'intros', 'titles', 'ctas', 'visuals', 'thumbnails', 'carousel', 'complete')),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     published_at DATETIME,
@@ -171,10 +171,52 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS project_search_settings (
     id TEXT PRIMARY KEY,
     project_id TEXT UNIQUE NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
-    web_search_enabled INTEGER NOT NULL DEFAULT 1,
+    web_search_enabled INTEGER NOT NULL DEFAULT 0,
     search_provider TEXT NOT NULL DEFAULT 'claude' CHECK (search_provider IN ('claude', 'perplexity', 'auto')),
     max_searches INTEGER NOT NULL DEFAULT 5,
     allowed_domains TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Project sources table (text-based context for AI generation)
+  CREATE TABLE IF NOT EXISTS project_sources (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    type TEXT NOT NULL CHECK (type IN ('text', 'file', 'url')),
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    original_filename TEXT,
+    original_url TEXT,
+    mime_type TEXT,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Carousel templates table
+  CREATE TABLE IF NOT EXISTS carousel_templates (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    slide_count INTEGER NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  -- Carousel template slides table
+  CREATE TABLE IF NOT EXISTS carousel_template_slides (
+    id TEXT PRIMARY KEY,
+    template_id TEXT NOT NULL REFERENCES carousel_templates(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    background_data BLOB,
+    text_zones TEXT NOT NULL DEFAULT '[]'
+  );
+
+  -- Carousel outputs table (generated carousel content)
+  CREATE TABLE IF NOT EXISTS carousel_outputs (
+    id TEXT PRIMARY KEY,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    template_id TEXT REFERENCES carousel_templates(id) ON DELETE SET NULL,
+    slides TEXT NOT NULL DEFAULT '[]',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
@@ -193,6 +235,10 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_content_versions_project_id ON content_versions(project_id);
   CREATE INDEX IF NOT EXISTS idx_research_results_project_id ON research_results(project_id);
   CREATE INDEX IF NOT EXISTS idx_research_results_created_at ON research_results(created_at);
+  CREATE INDEX IF NOT EXISTS idx_project_sources_project_id ON project_sources(project_id);
+  CREATE INDEX IF NOT EXISTS idx_carousel_templates_project_id ON carousel_templates(project_id);
+  CREATE INDEX IF NOT EXISTS idx_carousel_template_slides_template_id ON carousel_template_slides(template_id);
+  CREATE INDEX IF NOT EXISTS idx_carousel_outputs_project_id ON carousel_outputs(project_id);
 `)
 
 // Migration helper: safely add columns if they don't exist
@@ -238,8 +284,86 @@ addColumnIfNotExists('content_versions', 'project_id', 'TEXT REFERENCES projects
 addColumnIfNotExists('outputs', 'research_context', 'TEXT')
 addColumnIfNotExists('outputs', 'citations', "TEXT NOT NULL DEFAULT '[]'")
 
+// Migration: Update projects table CHECK constraint to include 'carousel'
+// IMPORTANT: This migration is now a no-op since the schema already includes 'carousel'
+// The initial migration caused data loss due to CASCADE DELETE when dropping the table.
+// Future schema changes requiring table rebuilds MUST:
+// 1. Disable foreign keys: PRAGMA foreign_keys = OFF
+// 2. Perform the migration in a transaction
+// 3. Re-enable foreign keys: PRAGMA foreign_keys = ON
+// 4. Run PRAGMA foreign_key_check to verify integrity
+//
+// The 'carousel' step is now included in the initial CREATE TABLE statement,
+// so no migration is needed for new databases.
+
 // Insert default system prompts if they don't exist
 const defaultPrompts = [
+  {
+    key: 'master_voice_prompt',
+    value: `You are writing in John E. Milad's voice. Optimize for clarity, credibility, decisiveness, and intellectual rigor. The reader is smart and busy.
+
+Voice and posture:
+- Clear, confident, and measured; authoritative without arrogance
+- Decisive: take a position, make a recommendation, drive to action. Never end on "it depends"
+- Evidence-led and precise: distinguish facts from interpretation. Label uncertainty explicitly (e.g., "Confidence: medium") — but still choose a best answer
+
+No equivocation:
+- Do not hedge with excessive qualifiers unless uncertainty is real and material
+- When uncertain: (1) state the recommendation anyway, (2) state key assumptions, (3) state what would change your mind
+
+Stylistic models (directional):
+- The Economist editorial voice; Krugman (argument clarity), Michael Lewis (narrative efficiency), Buffett (plainspoken pragmatism)
+
+Core writing principles:
+- Lead with the point: first sentence states purpose and conclusion
+- Tight logical flow: claim → evidence → implication → next step
+- Prefer concrete specifics (numbers, dates, thresholds) over abstractions
+- Maintain nuance without dithering: acknowledge trade-offs, then pick the best path
+
+Sentence and paragraph style:
+- Short-to-medium sentences; active voice; minimal filler
+- Short paragraphs (1–3 sentences). Use white space
+- Bullets for lists; numbered lists for sequences or decisions
+
+Prohibitions:
+- Do not invent facts, dates, quotes, or commitments
+- Avoid jargon unless it increases precision (and define it briefly)
+- Avoid motivational/cheerleading language
+- No emojis by default`
+  },
+  {
+    key: 'linkedin_tone_prompt',
+    value: `LinkedIn tone modifier:
+- Concise, science-first, and thoughtful
+- One clear takeaway per post — the reader should walk away with a single actionable insight
+- Minimal fluff: no motivational filler, no "I'm excited to announce" preamble
+- Short paragraphs (1–2 sentences) for mobile readability; use white space aggressively
+- Lead with a contrarian or non-obvious insight, not self-promotion
+- End with a clear question or single CTA to drive engagement
+- Professional but not stiff — measured warmth, not corporate-speak`
+  },
+  {
+    key: 'youtube_tone_prompt',
+    value: `YouTube tone modifier:
+- Authoritative but conversational — the Economist meets a smart friend explaining over coffee
+- Front-load value: state what the viewer will learn in the first 10 seconds
+- Decisive and direct: take a clear position, don't waffle
+- Short sentences for spoken delivery; natural speech patterns with verbal emphasis cues
+- Use curiosity loops to maintain watch time, but always deliver on promises (no clickbait)
+- Concrete specifics: numbers, examples, thresholds — not vague generalizations
+- End with one clear CTA (subscribe, comment, next video) — never stack multiple asks`
+  },
+  {
+    key: 'facebook_tone_prompt',
+    value: `Facebook tone modifier:
+- Casual, authentic, playful, and approachable
+- Write as if to a friendly, intimate audience — not a professional network
+- Use contractions, light humor, and simple language
+- Keep it human and unpolished (but still clear and purposeful)
+- Share a viewpoint and personal reaction; avoid corporate tone entirely
+- Storytelling-first: lead with personal anecdotes or relatable observations
+- It's fine to be opinionated and direct — the audience values authenticity over polish`
+  },
   {
     key: 'hooks_agent_prompt',
     value: `You are an expert content hook writer specializing in attention-grabbing opening lines.
@@ -309,6 +433,22 @@ const insertSetting = db.prepare(`
 
 for (const prompt of defaultPrompts) {
   insertSetting.run(prompt.key, prompt.key, prompt.value)
+}
+
+// Migrate old generic voice/tone defaults to personalized defaults
+// Only updates rows that still have the old placeholder text (won't overwrite user customizations)
+const migratePrompt = db.prepare(`UPDATE settings SET value = ? WHERE key = ? AND value LIKE ?`)
+for (const prompt of defaultPrompts.slice(0, 4)) {
+  const oldPrefixes: Record<string, string> = {
+    master_voice_prompt: 'You write with an authentic%',
+    linkedin_tone_prompt: 'Tone modifier for LinkedIn:%',
+    youtube_tone_prompt: 'Tone modifier for YouTube:%',
+    facebook_tone_prompt: 'Tone modifier for Facebook:%',
+  }
+  const prefix = oldPrefixes[prompt.key]
+  if (prefix) {
+    migratePrompt.run(prompt.value, prompt.key, prefix)
+  }
 }
 
 export default db
