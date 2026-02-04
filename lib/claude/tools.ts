@@ -96,7 +96,7 @@ export const UI_MANIPULATION_TOOLS: Tool[] = [
   },
   {
     name: 'generate_image',
-    description: 'Generate a new image. Use when the user asks to create, generate, or make a new image or thumbnail. If the user mentions using their uploaded reference images for style guidance, set use_references to true.',
+    description: 'CALL THIS TOOL to generate a standalone image (not linked to a thumbnail slot). Use for general image requests when no specific thumbnail slot is mentioned. For specific thumbnail slots, use generate_thumbnail instead.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -119,7 +119,7 @@ export const UI_MANIPULATION_TOOLS: Tool[] = [
   },
   {
     name: 'refine_image',
-    description: 'Refine or modify an existing generated image. Use when the user wants to change, update, or improve a specific generated image. The image_id can be found in the "Generated Images" context provided to you.',
+    description: 'CALL THIS TOOL to modify/refine an existing generated image. Use when users say "change this image", "make it brighter", "modify thumbnail X", "adjust the colors", etc. You MUST have an image_id from the Thumbnails context to use this tool.',
     input_schema: {
       type: 'object' as const,
       properties: {
@@ -137,6 +137,33 @@ export const UI_MANIPULATION_TOOLS: Tool[] = [
         }
       },
       required: ['image_id', 'refinement_prompt']
+    }
+  },
+  {
+    name: 'generate_thumbnail',
+    description: 'CALL THIS TOOL to generate a new thumbnail image for a specific slot (1-4). This is the ONLY way to generate thumbnails - you must call this tool for the image to be created. Use when users say: "generate thumbnail X", "create thumbnail X", "regenerate thumbnail X", "add as thumbnail X", "new image for slot X", etc.',
+    input_schema: {
+      type: 'object' as const,
+      properties: {
+        prompt: {
+          type: 'string',
+          description: 'A detailed image generation prompt describing what to create'
+        },
+        thumbnail_index: {
+          type: 'number',
+          description: 'The thumbnail slot to assign (1-4). Thumbnail 1 = first visual concept, Thumbnail 2 = second, etc.'
+        },
+        use_references: {
+          type: 'boolean',
+          description: 'Whether to include the user\'s uploaded reference images (logos, brand photos, style references) as style guidance'
+        },
+        aspect_ratio: {
+          type: 'string',
+          enum: ['1:1', '16:9', '9:16', '4:3'],
+          description: 'Aspect ratio for the image. Default is 1:1.'
+        }
+      },
+      required: ['prompt', 'thumbnail_index']
     }
   },
   // Carousel-specific tools
@@ -260,6 +287,16 @@ export function parseToolCalls(toolCalls: { name: string; input: Record<string, 
         })
         break
 
+      case 'generate_thumbnail':
+        actions.push({
+          type: 'generate_thumbnail',
+          prompt: call.input.prompt as string,
+          thumbnail_index: call.input.thumbnail_index as number,
+          use_references: (call.input.use_references as boolean) || false,
+          aspect_ratio: (call.input.aspect_ratio as string) || '1:1'
+        })
+        break
+
       // Carousel-specific tools
       case 'edit_carousel_slide':
         actions.push({
@@ -303,18 +340,26 @@ Content tools:
 - add_more: Add additional options without removing existing ones
 
 Image tools:
-- generate_image: Generate a new image from a text prompt. Set use_references=true to incorporate the user's uploaded reference images (logos, brand photos, style references) as style guidance.
-- refine_image: Modify an existing generated image. Use the image_id from the "Generated Images" section in your context. Set use_references=true to use reference images as guidance.
+- generate_thumbnail: Generate a new image AND assign it to a specific thumbnail slot (1-4). Use when users say "regenerate thumbnail 3", "add as thumbnail 4", "create a new image for thumbnail 2", etc. This is the preferred tool when users mention a specific thumbnail number.
+- generate_image: Generate a standalone image (not linked to a thumbnail slot). Use for general image requests without a specific slot.
+- refine_image: Modify an existing generated image. Use the image_id from the "Thumbnails" section in your context. Set use_references=true to use reference images as guidance.
 
 Carousel tools (use these when on the Carousel step):
 - edit_carousel_slide: Edit a slide's text (headline, body, cta, or visual_prompt)
 - set_slide_image: Place a reference image from Context onto a carousel slide. Use the asset_id from the "Reference Images" context.
 - remove_slide_image: Remove the image from a carousel slide
 
-When users ask you to make changes to their content:
-1. Listen carefully to what they want to change
-2. Use the appropriate tool to make the change
-3. Explain what you did and why
+IMPORTANT: When users ask you to make changes or generate images, you MUST actually use the tools - do not just describe what you would do. The tools are how changes happen.
+
+When users ask for changes:
+1. Immediately use the appropriate tool to make the change
+2. After the tool executes, briefly explain what was done
+
+For image requests specifically:
+- When users ask to "generate thumbnail X", "create a new thumbnail for slot X", "regenerate thumbnail X", or similar -> USE generate_thumbnail with the correct thumbnail_index
+- When users ask to "refine", "modify", "change", or "update" an existing thumbnail -> USE refine_image with the image_id
+- NEVER just say "I'll generate..." or "I'll create..." without actually calling the tool
+- If you don't use a tool, the image won't be generated
 
 Card numbering:
 - Cards are numbered starting from 1 in the UI
@@ -328,10 +373,13 @@ Slide numbering (carousel):
 - When users refer to "slide 2" or "the second slide", use slide_index 1
 - And so on...
 
-Image numbering:
-- Images are numbered starting from 1 in the UI
-- When users say "image 1" or "the first image", look up the corresponding image_id from the Generated Images context
-- Use the image_id (not the number) when calling refine_image
+Thumbnail numbering:
+- Thumbnails are numbered 1-4 in the UI (corresponding to visual concepts 1-4)
+- When users say "thumbnail 1" or "the first thumbnail", use thumbnail_index=1 with generate_thumbnail
+- When users say "regenerate thumbnail 3 from scratch", use generate_thumbnail with thumbnail_index=3
+- When refining an existing image, use the image_id from the "Thumbnails" context with refine_image
+- For generate_thumbnail: thumbnail_index is 1-based (1, 2, 3, 4)
+- For refine_image: use the image_id, the thumbnail slot stays the same
 
 Content types:
 - hook: Opening lines / attention grabbers

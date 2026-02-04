@@ -18,7 +18,8 @@ import { RefineImageModal } from '@/components/modals/RefineImageModal'
 import { ThumbnailHistoryModal } from '@/components/modals/ThumbnailHistoryModal'
 import { UpscaleModal } from '@/components/modals/UpscaleModal'
 import type { Project, Output, Message, WorkflowStep, GeneratedImage, VisualConcept, ContentType, CarouselSlide, CarouselTemplate } from '@/types'
-import { WORKFLOW_CONFIGS, STEP_LABELS } from '@/types'
+import { WORKFLOW_CONFIGS, STEP_LABELS, PLATFORM_ASPECT_RATIOS, ASPECT_RATIO_OPTIONS } from '@/types'
+import { VisualConceptCard } from '@/components/cards/VisualConceptCard'
 import { CarouselEditor, TemplateImporter } from '@/components/carousel'
 
 interface ProjectData {
@@ -91,54 +92,64 @@ export default function ProjectPage() {
   // Track completed steps based on actual user selections
   const [completedSteps, setCompletedSteps] = useState<WorkflowStep[]>([])
 
+  // Aspect ratio for image generation
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState<typeof ASPECT_RATIO_OPTIONS[0]>(ASPECT_RATIO_OPTIONS[0])
+
   // Calculate completed steps from output data and current step
   useEffect(() => {
     const output = data?.output
-    const currentStep = data?.project?.current_step
-
-    if (!output) {
-      setCompletedSteps([])
-      return
-    }
+    const project = data?.project
+    const config = project?.platform ? WORKFLOW_CONFIGS[project.platform] : null
 
     const completed: WorkflowStep[] = []
 
-    // Hooks: completed if user has made a selection
-    if (output.selected_hook_index >= 0) {
+    // Setup: always completed once project exists (has topic)
+    if (project?.topic) {
+      completed.push('setup')
+    }
+
+    if (!output) {
+      setCompletedSteps(completed)
+      return
+    }
+
+    // Hooks: completed only if user explicitly selected (>= 0)
+    if (output.selected_hook_index !== undefined && output.selected_hook_index >= 0) {
       completed.push('hooks')
     }
 
-    // Body: completed if body content exists
-    if (output.body_content) {
+    // Body: completed if user has accepted it (selected_body_index >= 0)
+    // This is set when user clicks "Next" from the body step
+    if (output.selected_body_index !== undefined && output.selected_body_index >= 0) {
       completed.push('body')
     }
 
-    // CTAs: completed if user has made a selection (including -1 for "No CTA")
-    if (output.selected_cta_index !== undefined && output.selected_cta_index !== null) {
+    // CTAs: completed if user selected (>= 0) OR explicitly skipped (-2)
+    if (output.selected_cta_index !== undefined && (output.selected_cta_index >= 0 || output.selected_cta_index === -2)) {
       completed.push('ctas')
     }
 
-    // Visuals: completed if user has made a selection
-    if (output.selected_visual_index >= 0) {
+    // Titles: completed only if user explicitly selected (>= 0)
+    if (output.selected_title_index !== undefined && output.selected_title_index >= 0) {
+      completed.push('titles')
+    }
+
+    // Visuals: completed if user selected (>= 0) OR explicitly skipped (-2)
+    if (output.selected_visual_index !== undefined && (output.selected_visual_index >= 0 || output.selected_visual_index === -2)) {
       completed.push('visuals')
     }
 
     // YouTube-specific steps
-    if (output.selected_title_index >= 0) {
-      completed.push('titles')
-    }
-    if (output.selected_intro_index >= 0) {
+    if (output.selected_intro_index !== undefined && output.selected_intro_index >= 0) {
       completed.push('intros')
     }
-    if (output.selected_visual_index >= 0) {
+    if (output.selected_visual_index !== undefined && output.selected_visual_index >= 0) {
       completed.push('thumbnails')
     }
 
     // Summary (complete): marked done when all prior workflow steps are completed
-    const platform = data?.project?.platform
-    if (platform) {
-      const config = WORKFLOW_CONFIGS[platform]
-      const requiredSteps = config.steps.filter(s => s !== 'complete')
+    if (config) {
+      const requiredSteps = config.steps.filter(s => s !== 'complete' && s !== 'setup')
       const allPriorStepsComplete = requiredSteps.every(step => completed.includes(step))
       if (allPriorStepsComplete) {
         completed.push('complete')
@@ -146,7 +157,7 @@ export default function ProjectPage() {
     }
 
     setCompletedSteps(completed)
-  }, [data?.output, data?.project?.current_step, data?.project?.platform])
+  }, [data?.output, data?.project?.current_step, data?.project?.platform, data?.project?.topic])
 
   // Fetch project data
   const fetchProject = useCallback(async () => {
@@ -178,6 +189,19 @@ export default function ProjectPage() {
   useEffect(() => {
     fetchProject()
   }, [fetchProject])
+
+  // Set default aspect ratio based on platform when project loads
+  useEffect(() => {
+    if (data?.project?.platform) {
+      const platformDefault = PLATFORM_ASPECT_RATIOS[data.project.platform]
+      const matchingOption = ASPECT_RATIO_OPTIONS.find(
+        opt => opt.width === platformDefault.width && opt.height === platformDefault.height
+      )
+      if (matchingOption) {
+        setSelectedAspectRatio(matchingOption)
+      }
+    }
+  }, [data?.project?.platform])
 
   // Generate content for current step
   const handleGenerate = async () => {
@@ -284,13 +308,21 @@ export default function ProjectPage() {
   }
 
   // Handle next step
-  const handleNext = () => {
+  const handleNext = async () => {
     if (!data) return
 
     const config = WORKFLOW_CONFIGS[data.project.platform]
-    const currentIndex = config.steps.indexOf(data.project.current_step)
+    const currentStep = data.project.current_step
+    const currentIndex = config.steps.indexOf(currentStep)
+
+    // When advancing from body step, mark it as accepted (selected_body_index = 0)
+    // Body has only one card, so accepting it means selecting index 0
+    if (currentStep === 'body' && data.output?.body_content) {
+      await handleOutputUpdate({ selected_body_index: 0 })
+    }
+
     if (currentIndex < config.steps.length - 1) {
-      handleStepChange(config.steps[currentIndex + 1])
+      await handleStepChange(config.steps[currentIndex + 1])
     }
   }
 
@@ -345,10 +377,9 @@ export default function ProjectPage() {
         }
       })
 
-      // If an image was generated/refined, refresh project data to update the images list
-      if (result.generatedImage) {
-        await fetchProject()
-      }
+      // Always refresh project data after assistant response to catch any image/content changes
+      // This ensures we get the latest images even if the response structure changes
+      await fetchProject()
     } catch (err) {
       console.error('Chat error:', err)
       // Show error in chat, remove temp user message
@@ -401,6 +432,9 @@ export default function ProjectPage() {
         body: JSON.stringify({
           project_id: projectId,
           prompt: concept.description,
+          visual_concept_index: index,
+          width: selectedAspectRatio.width,
+          height: selectedAspectRatio.height,
         }),
       })
 
@@ -415,6 +449,92 @@ export default function ProjectPage() {
     } finally {
       setGeneratingImageIndex(null)
     }
+  }
+
+  // Regenerate image from new prompt (used in RefineImageModal)
+  const handleRegenerateImage = async (newPrompt: string) => {
+    if (!refineImageData) return
+
+    try {
+      // Find the visual concept index for this image
+      const image = data?.generatedImages.find(img => img.id === refineImageData.id)
+      const visualIndex = image?.visual_concept_index ?? 0
+
+      const response = await fetch('/api/images/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          project_id: projectId,
+          prompt: newPrompt,
+          visual_concept_index: visualIndex,
+          width: selectedAspectRatio.width,
+          height: selectedAspectRatio.height,
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error('Failed to regenerate image')
+      }
+
+      // Refresh to get the new image
+      await fetchProject()
+    } catch (err) {
+      console.error('Failed to regenerate image:', err)
+      throw err
+    }
+  }
+
+  // Edit a visual concept description
+  const handleEditVisualConcept = (index: number, newDescription: string) => {
+    if (!data?.output) return
+    const concepts = [...(data.output.visual_concepts || [])]
+    concepts[index] = { ...concepts[index], description: newDescription }
+    handleOutputUpdate({ visual_concepts: concepts })
+  }
+
+  // Delete a visual concept
+  const handleDeleteVisualConcept = (index: number) => {
+    if (!data?.output) return
+    const concepts = [...(data.output.visual_concepts || [])]
+    concepts.splice(index, 1)
+
+    // Also remove from original if it matches
+    const originalConcepts = [...(data.output.visual_concepts_original || [])]
+    if (index < originalConcepts.length) {
+      originalConcepts.splice(index, 1)
+    }
+
+    // Adjust selected index if needed
+    let newSelectedIndex = data.output.selected_visual_index ?? 0
+    if (index < newSelectedIndex) {
+      newSelectedIndex--
+    } else if (index === newSelectedIndex) {
+      newSelectedIndex = Math.min(newSelectedIndex, concepts.length - 1)
+    }
+
+    handleOutputUpdate({
+      visual_concepts: concepts,
+      visual_concepts_original: originalConcepts,
+      selected_visual_index: newSelectedIndex >= 0 ? newSelectedIndex : -1
+    })
+  }
+
+  // Add a custom visual concept
+  const handleAddCustomVisual = (description: string) => {
+    if (!data?.output) return
+    const concepts = [...(data.output.visual_concepts || [])]
+    const newConcept = { description }
+    concepts.push(newConcept)
+
+    // Also add to original
+    const originalConcepts = [...(data.output.visual_concepts_original || [])]
+    originalConcepts.push(newConcept)
+
+    handleOutputUpdate({
+      visual_concepts: concepts,
+      visual_concepts_original: originalConcepts,
+      selected_visual_index: concepts.length - 1, // Select the new one
+    })
   }
 
   // Open refine modal for an image
@@ -678,8 +798,137 @@ export default function ProjectPage() {
     const { output, project } = data
     const currentStep = project.current_step
 
+    // Setup stage - show editable project info
+    if (currentStep === 'setup') {
+      return (
+        <div className="max-w-2xl mx-auto space-y-6 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 space-y-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Project Name
+              </label>
+              <input
+                type="text"
+                value={project.name}
+                onChange={async (e) => {
+                  try {
+                    const response = await fetch(`/api/projects/${projectId}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ name: e.target.value }),
+                    })
+                    if (response.ok) {
+                      const updated = await response.json()
+                      setData(prev => prev ? { ...prev, project: updated } : null)
+                    }
+                  } catch (err) {
+                    console.error('Failed to update project name:', err)
+                  }
+                }}
+                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Platform
+              </label>
+              <div className="p-3 bg-gray-50 dark:bg-gray-900 rounded-lg text-gray-700 dark:text-gray-300">
+                {project.platform.charAt(0).toUpperCase() + project.platform.slice(1)}
+                <span className="text-xs text-gray-500 ml-2">(cannot be changed after creation)</span>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Content Topic
+              </label>
+              <textarea
+                value={project.topic}
+                onChange={async (e) => {
+                  try {
+                    const response = await fetch(`/api/projects/${projectId}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ topic: e.target.value }),
+                    })
+                    if (response.ok) {
+                      const updated = await response.json()
+                      setData(prev => prev ? { ...prev, project: updated } : null)
+                    }
+                  } catch (err) {
+                    console.error('Failed to update topic:', err)
+                  }
+                }}
+                rows={3}
+                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white resize-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Target Audience
+              </label>
+              <input
+                type="text"
+                value={project.target_audience || ''}
+                onChange={async (e) => {
+                  try {
+                    const response = await fetch(`/api/projects/${projectId}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ target_audience: e.target.value }),
+                    })
+                    if (response.ok) {
+                      const updated = await response.json()
+                      setData(prev => prev ? { ...prev, project: updated } : null)
+                    }
+                  } catch (err) {
+                    console.error('Failed to update target audience:', err)
+                  }
+                }}
+                placeholder="e.g., Marketing professionals, startup founders..."
+                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Content Style
+              </label>
+              <input
+                type="text"
+                value={project.content_style || ''}
+                onChange={async (e) => {
+                  try {
+                    const response = await fetch(`/api/projects/${projectId}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ content_style: e.target.value }),
+                    })
+                    if (response.ok) {
+                      const updated = await response.json()
+                      setData(prev => prev ? { ...prev, project: updated } : null)
+                    }
+                  } catch (err) {
+                    console.error('Failed to update content style:', err)
+                  }
+                }}
+                placeholder="e.g., Professional, casual, humorous..."
+                className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+              />
+            </div>
+          </div>
+
+          <div className="text-center text-sm text-gray-500 dark:text-gray-400">
+            These settings help customize your AI-generated content. Click Next to proceed to content generation.
+          </div>
+        </div>
+      )
+    }
+
     // Check if we need to generate content first
-    if (!output && currentStep !== 'complete') {
+    if (!output && currentStep !== 'complete' && currentStep !== 'setup') {
       return (
         <div className="flex flex-col items-center justify-center h-full text-center p-8">
           <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
@@ -733,13 +982,13 @@ export default function ProjectPage() {
       indexKey: string
       itemsKey: string
     }> = {
-      hooks: { items: output?.hooks || [], originalItems: output?.hooks_original || [], selectedIndex: output?.selected_hook_index || 0, indexKey: 'selected_hook_index', itemsKey: 'hooks' },
-      body: { items: [output?.body_content || ''], originalItems: [output?.body_content_original || ''], selectedIndex: output?.selected_body_index || 0, indexKey: 'selected_body_index', itemsKey: 'body_content' },
-      intros: { items: output?.intros || [], originalItems: output?.intros_original || [], selectedIndex: output?.selected_intro_index || 0, indexKey: 'selected_intro_index', itemsKey: 'intros' },
-      titles: { items: output?.titles || [], originalItems: output?.titles_original || [], selectedIndex: output?.selected_title_index || 0, indexKey: 'selected_title_index', itemsKey: 'titles' },
-      ctas: { items: output?.ctas || [], originalItems: output?.ctas_original || [], selectedIndex: output?.selected_cta_index || 0, indexKey: 'selected_cta_index', itemsKey: 'ctas' },
-      visuals: { items: output?.visual_concepts || [], originalItems: output?.visual_concepts_original || [], selectedIndex: output?.selected_visual_index || 0, indexKey: 'selected_visual_index', itemsKey: 'visual_concepts' },
-      thumbnails: { items: output?.visual_concepts || [], originalItems: output?.visual_concepts_original || [], selectedIndex: output?.selected_visual_index || 0, indexKey: 'selected_visual_index', itemsKey: 'visual_concepts' },
+      hooks: { items: output?.hooks || [], originalItems: output?.hooks_original || [], selectedIndex: output?.selected_hook_index ?? -1, indexKey: 'selected_hook_index', itemsKey: 'hooks' },
+      body: { items: [output?.body_content || ''], originalItems: [output?.body_content_original || ''], selectedIndex: output?.selected_body_index ?? -1, indexKey: 'selected_body_index', itemsKey: 'body_content' },
+      intros: { items: output?.intros || [], originalItems: output?.intros_original || [], selectedIndex: output?.selected_intro_index ?? -1, indexKey: 'selected_intro_index', itemsKey: 'intros' },
+      titles: { items: output?.titles || [], originalItems: output?.titles_original || [], selectedIndex: output?.selected_title_index ?? -1, indexKey: 'selected_title_index', itemsKey: 'titles' },
+      ctas: { items: output?.ctas || [], originalItems: output?.ctas_original || [], selectedIndex: output?.selected_cta_index ?? -1, indexKey: 'selected_cta_index', itemsKey: 'ctas' },
+      visuals: { items: output?.visual_concepts || [], originalItems: output?.visual_concepts_original || [], selectedIndex: output?.selected_visual_index ?? -1, indexKey: 'selected_visual_index', itemsKey: 'visual_concepts' },
+      thumbnails: { items: output?.visual_concepts || [], originalItems: output?.visual_concepts_original || [], selectedIndex: output?.selected_visual_index ?? -1, indexKey: 'selected_visual_index', itemsKey: 'visual_concepts' },
     }
 
     // For carousel step (check before sectionMap since carousel isn't in it)
@@ -808,39 +1057,108 @@ export default function ProjectPage() {
     const section = sectionMap[currentStep]
     if (!section) return null
 
-    // For visuals/thumbnails, use ImageCard
+    // For visuals/thumbnails, use ImageCard or VisualConceptCard
     if (currentStep === 'visuals' || currentStep === 'thumbnails') {
       // Get generated images for this project to match with concepts
       const generatedImages = data.generatedImages || []
+      const isVisuals = currentStep === 'visuals'
+      const isSkipped = section.selectedIndex === -2  // -2 means explicitly skipped
 
       return (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {(section.items as VisualConcept[]).map((concept, index) => {
-            // Find matching generated image for this concept
-            const matchingImage = generatedImages.find(
-              img => img.prompt === concept.description || img.prompt?.includes(concept.description?.substring(0, 50))
-            ) as GeneratedImage | undefined
+        <div className="space-y-4">
+          {/* Aspect Ratio Selector */}
+          <div className="flex items-center gap-4 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+            <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Aspect Ratio:</span>
+            <div className="flex flex-wrap gap-2">
+              {ASPECT_RATIO_OPTIONS.map((option) => (
+                <button
+                  key={option.ratio}
+                  onClick={() => setSelectedAspectRatio(option)}
+                  className={`px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                    selectedAspectRatio.ratio === option.ratio
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white dark:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600 hover:border-blue-400'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
 
-            return (
-              <ImageCard
-                key={index}
-                index={index}
-                concept={concept}
-                image={matchingImage}
-                isSelected={index === section.selectedIndex}
-                onSelect={() => handleOutputUpdate({ [section.indexKey]: index })}
-                onGenerate={() => handleGenerateImage(concept, index)}
-                isGenerating={generatingImageIndex === index}
-                onRefine={matchingImage ? () => handleOpenRefineModal(matchingImage) : undefined}
-                onUpscale={matchingImage && !matchingImage.is_upscaled ? () => handleOpenUpscaleModal(matchingImage) : undefined}
-                onDelete={matchingImage ? () => handleDeleteImage(matchingImage) : undefined}
-                onDownload={matchingImage ? () => handleDownloadImage(matchingImage) : undefined}
-                onViewFullScreen={matchingImage ? () => handleViewFullScreen(matchingImage, index) : undefined}
-                onHistory={matchingImage ? () => handleOpenThumbnailHistory(matchingImage.id) : undefined}
-                showPrompt={true}
+          {/* Image Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* Skip option for visuals (not thumbnails) */}
+            {isVisuals && (
+              <SkipOptionCard
+                isSelected={isSkipped}
+                onSelect={() => handleOutputUpdate({ selected_visual_index: -2 })}
+                label="No Image Needed"
+                description="Continue without a post image"
               />
-            )
-          })}
+            )}
+
+            {(section.items as VisualConcept[]).map((concept, index) => {
+              // Find matching generated image for this concept
+              // First try explicit linkage via visual_concept_index
+              let matchingImage = generatedImages.find(
+                img => img.visual_concept_index === index
+              ) as GeneratedImage | undefined
+
+              // Fallback to prompt matching for backward compatibility with existing images
+              if (!matchingImage) {
+                matchingImage = generatedImages.find(
+                  img => img.visual_concept_index === undefined &&
+                         (img.prompt === concept.description || img.prompt?.includes(concept.description?.substring(0, 50)))
+                ) as GeneratedImage | undefined
+              }
+
+              // If no image generated yet, show the VisualConceptCard (text-only with edit/delete)
+              if (!matchingImage) {
+                return (
+                  <VisualConceptCard
+                    key={index}
+                    index={index}
+                    concept={concept}
+                    isSelected={!isSkipped && index === section.selectedIndex}
+                    onSelect={() => handleOutputUpdate({ [section.indexKey]: index })}
+                    onEdit={(newDescription) => handleEditVisualConcept(index, newDescription)}
+                    onDelete={() => handleDeleteVisualConcept(index)}
+                    onGenerate={() => handleGenerateImage(concept, index)}
+                    isGenerating={generatingImageIndex === index}
+                  />
+                )
+              }
+
+              // Image exists, show the full ImageCard
+              return (
+                <ImageCard
+                  key={index}
+                  index={index}
+                  concept={concept}
+                  image={matchingImage}
+                  isSelected={!isSkipped && index === section.selectedIndex}
+                  onSelect={() => handleOutputUpdate({ [section.indexKey]: index })}
+                  onGenerate={() => handleGenerateImage(concept, index)}
+                  isGenerating={generatingImageIndex === index}
+                  onRefine={matchingImage ? () => handleOpenRefineModal(matchingImage) : undefined}
+                  onUpscale={matchingImage && !matchingImage.is_upscaled ? () => handleOpenUpscaleModal(matchingImage) : undefined}
+                  onDelete={matchingImage ? () => handleDeleteImage(matchingImage) : undefined}
+                  onDownload={matchingImage ? () => handleDownloadImage(matchingImage) : undefined}
+                  onViewFullScreen={matchingImage ? () => handleViewFullScreen(matchingImage, index) : undefined}
+                  onHistory={matchingImage ? () => handleOpenThumbnailHistory(matchingImage.id) : undefined}
+                  showPrompt={true}
+                />
+              )
+            })}
+
+            {/* Custom concept input */}
+            <CustomContentCard
+              onSave={handleAddCustomVisual}
+              placeholder="Describe your image concept..."
+              label="Describe Your Own Image"
+            />
+          </div>
         </div>
       )
     }
@@ -867,7 +1185,7 @@ export default function ProjectPage() {
     // For other content types, show cards
     const originalItems = section.originalItems as string[] || []
     const isCTA = currentStep === 'ctas'
-    const isSkipped = isCTA && section.selectedIndex === -1
+    const isSkipped = isCTA && section.selectedIndex === -2  // -2 means explicitly skipped
 
     // Map step to content type for history
     const stepToContentType: Record<string, ContentType> = {
@@ -908,7 +1226,7 @@ export default function ProjectPage() {
         {isCTA && (
           <SkipOptionCard
             isSelected={isSkipped}
-            onSelect={() => handleOutputUpdate({ selected_cta_index: -1 })}
+            onSelect={() => handleOutputUpdate({ selected_cta_index: -2 })}
             label="No CTA Needed"
             description="Continue without a call to action"
           />
@@ -1120,6 +1438,7 @@ export default function ProjectPage() {
           }}
           currentImage={refineImageData}
           onRefine={handleRefineImage}
+          onRegenerate={handleRegenerateImage}
         />
       )}
 

@@ -5,7 +5,7 @@
 export type Platform = 'linkedin' | 'youtube' | 'facebook'
 export type ProjectStatus = 'in_progress' | 'complete' | 'published'
 export type SessionStatus = ProjectStatus // Alias for backward compatibility
-export type WorkflowStep = 'hooks' | 'body' | 'intros' | 'titles' | 'ctas' | 'visuals' | 'thumbnails' | 'carousel' | 'complete'
+export type WorkflowStep = 'setup' | 'hooks' | 'body' | 'intros' | 'titles' | 'ctas' | 'visuals' | 'thumbnails' | 'carousel' | 'complete'
 
 // ============================================
 // Project Types (New)
@@ -187,6 +187,7 @@ export interface GeneratedImage {
   model: string
   is_upscaled: boolean
   parent_image_id?: string
+  visual_concept_index?: number // 0-3, links to visual_concepts array index
   created_at: string
 }
 
@@ -196,6 +197,7 @@ export interface GenerateImageRequest {
   reference_image_id?: string
   width?: number
   height?: number
+  visual_concept_index?: number // 0-3, links to visual_concepts array index
 }
 
 export interface RefineImageRequest {
@@ -354,6 +356,7 @@ export type AssistantAction =
   | { type: 'add_more'; content_type: ContentType }
   | { type: 'generate_image'; prompt: string; use_references: boolean; aspect_ratio: string }
   | { type: 'refine_image'; image_id: string; refinement_prompt: string; use_references: boolean }
+  | { type: 'generate_thumbnail'; prompt: string; thumbnail_index: number; use_references: boolean; aspect_ratio: string }
   // Carousel-specific actions
   | { type: 'edit_carousel_slide'; slide_index: number; field: CarouselSlideField; value: string }
   | { type: 'set_slide_image'; slide_index: number; asset_id: string }
@@ -406,29 +409,45 @@ export interface WorkflowConfig {
 export const WORKFLOW_CONFIGS: Record<Platform, WorkflowConfig> = {
   linkedin: {
     platform: 'linkedin',
-    steps: ['hooks', 'body', 'ctas', 'visuals', 'complete']
+    steps: ['setup', 'hooks', 'body', 'ctas', 'titles', 'visuals', 'complete']
   },
   youtube: {
     platform: 'youtube',
-    steps: ['hooks', 'intros', 'titles', 'thumbnails', 'complete']
+    steps: ['setup', 'hooks', 'intros', 'titles', 'thumbnails', 'complete']
   },
   facebook: {
     platform: 'facebook',
-    steps: ['hooks', 'body', 'ctas', 'visuals', 'complete']
+    steps: ['setup', 'hooks', 'body', 'ctas', 'titles', 'visuals', 'complete']
   }
 }
 
 export const STEP_LABELS: Record<WorkflowStep, string> = {
+  setup: 'Project Setup',
   hooks: 'Hooks',
   body: 'Body Content',
   intros: 'Intros',
   titles: 'Titles',
   ctas: 'Call to Action',
-  visuals: 'Visual Concepts',
-  thumbnails: 'Thumbnails',
+  visuals: 'Image',
+  thumbnails: 'Thumbnail',
   carousel: 'Carousel',
   complete: 'Summary'
 }
+
+// Platform-specific default aspect ratios for images
+export const PLATFORM_ASPECT_RATIOS: Record<Platform, { ratio: string; width: number; height: number }> = {
+  linkedin: { ratio: '1.91:1', width: 1200, height: 630 },
+  facebook: { ratio: '1.91:1', width: 1200, height: 630 },
+  youtube: { ratio: '16:9', width: 1280, height: 720 },
+}
+
+// Available aspect ratio options for image generation
+export const ASPECT_RATIO_OPTIONS = [
+  { label: 'LinkedIn/Facebook (1200×630)', ratio: '1.91:1', width: 1200, height: 630 },
+  { label: 'YouTube (16:9)', ratio: '16:9', width: 1280, height: 720 },
+  { label: 'Square (1:1)', ratio: '1:1', width: 1024, height: 1024 },
+  { label: 'Portrait (9:16)', ratio: '9:16', width: 720, height: 1280 },
+]
 
 // ============================================
 // Search & Research Types

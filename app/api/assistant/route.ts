@@ -147,18 +147,24 @@ ${output ? formatCurrentContent(output) : 'No content generated yet.'}`
         : []
 
       const imagesStmt = db.prepare(
-        'SELECT id, prompt, width, height FROM generated_images WHERE project_id = ? ORDER BY created_at DESC'
+        'SELECT id, prompt, width, height, visual_concept_index FROM generated_images WHERE project_id = ? ORDER BY created_at DESC'
       )
-      const allImages = imagesStmt.all(project_id) as { id: string; prompt: string; width: number; height: number }[]
+      const allImages = imagesStmt.all(project_id) as { id: string; prompt: string; width: number; height: number; visual_concept_index: number | null }[]
 
-      if (visualConcepts.length > 0 && allImages.length > 0) {
+      if (visualConcepts.length > 0) {
         contextString += '\n\n--- Thumbnails ---\n'
-        contextString += 'These are the thumbnails currently displayed (use the id when calling refine_image):\n'
+        contextString += 'These are the visual concepts and their current thumbnails:\n'
+        contextString += '(Use generate_thumbnail with thumbnail_index to regenerate, or refine_image with id to modify)\n\n'
         visualConcepts.forEach((concept, i) => {
-          // Match using same logic as the UI (find most recent matching image)
-          const matchingImage = allImages.find(
-            img => img.prompt === concept.description || img.prompt?.includes(concept.description?.substring(0, 50))
-          )
+          // First try explicit linkage via visual_concept_index, then fall back to prompt matching
+          let matchingImage = allImages.find(img => img.visual_concept_index === i)
+          if (!matchingImage) {
+            matchingImage = allImages.find(
+              img => img.visual_concept_index === null &&
+                     (img.prompt === concept.description || img.prompt?.includes(concept.description?.substring(0, 50)))
+            )
+          }
+
           if (matchingImage) {
             const promptExcerpt = matchingImage.prompt.length > 80 ? matchingImage.prompt.substring(0, 80) + '...' : matchingImage.prompt
             contextString += `  Thumbnail ${i + 1}: "${promptExcerpt}" (id: ${matchingImage.id}, ${matchingImage.width}x${matchingImage.height})\n`
@@ -171,7 +177,8 @@ ${output ? formatCurrentContent(output) : 'No content generated yet.'}`
         contextString += '\n\n--- Generated Images ---\n'
         allImages.forEach((img, i) => {
           const promptExcerpt = img.prompt.length > 80 ? img.prompt.substring(0, 80) + '...' : img.prompt
-          contextString += `  Image ${i + 1}: "${promptExcerpt}" (id: ${img.id}, ${img.width}x${img.height})\n`
+          const slotInfo = img.visual_concept_index !== null ? ` [slot ${img.visual_concept_index + 1}]` : ''
+          contextString += `  Image ${i + 1}: "${promptExcerpt}" (id: ${img.id}${slotInfo})\n`
         })
         contextString += '\nUse the image id when calling refine_image.\n'
       }
@@ -264,6 +271,10 @@ ${output ? formatCurrentContent(output) : 'No content generated yet.'}`
       }
     }
 
+    // Log for debugging tool usage
+    console.log('[Assistant] Stop reason:', response.stop_reason)
+    console.log('[Assistant] Tool calls:', toolCalls.length > 0 ? toolCalls.map(t => t.name) : 'none')
+
     // Handle truncated response
     if (response.stop_reason === 'max_tokens' && !assistantMessage && toolCalls.length === 0) {
       assistantMessage = 'My response was too long and got cut off. Could you try a more specific request?'
@@ -271,10 +282,11 @@ ${output ? formatCurrentContent(output) : 'No content generated yet.'}`
 
     // Parse tool calls into actions
     const actions = parseToolCalls(toolCalls)
+    console.log('[Assistant] Parsed actions:', actions.length > 0 ? actions.map(a => a.type) : 'none')
 
     // Separate image actions, carousel actions, and content actions
     const carouselActionTypes = ['edit_carousel_slide', 'set_slide_image', 'remove_slide_image']
-    const imageActionTypes = ['generate_image', 'refine_image']
+    const imageActionTypes = ['generate_image', 'refine_image', 'generate_thumbnail']
     const contentActions = actions.filter(a => !imageActionTypes.includes(a.type) && !carouselActionTypes.includes(a.type))
     const imageActions = actions.filter(a => imageActionTypes.includes(a.type))
     const carouselActions = actions.filter(a => carouselActionTypes.includes(a.type))
@@ -293,9 +305,12 @@ ${output ? formatCurrentContent(output) : 'No content generated yet.'}`
     // Execute image actions
     let generatedImageResult: Omit<GeneratedImage, 'image_data'> | undefined
     if (imageActions.length > 0) {
+      console.log('[Assistant] Executing image actions:', imageActions.map(a => a.type))
       for (const action of imageActions) {
         try {
+          console.log('[Assistant] Executing:', action.type, action)
           generatedImageResult = await executeImageAction(project_id, action)
+          console.log('[Assistant] Image generated:', generatedImageResult?.id)
         } catch (err) {
           console.error('Failed to execute image action:', err)
           const errMsg = err instanceof Error ? err.message : 'Unknown error'
@@ -306,6 +321,8 @@ ${output ? formatCurrentContent(output) : 'No content generated yet.'}`
           }
         }
       }
+    } else {
+      console.log('[Assistant] No image actions to execute')
     }
 
     // Ensure assistant message is never empty (Claude sometimes returns only tool_use blocks)
@@ -622,9 +639,9 @@ async function executeImageAction(
 
   if (action.type === 'refine_image') {
     // Fetch original image
-    const imageStmt = db.prepare('SELECT id, project_id, prompt, image_data FROM generated_images WHERE id = ?')
+    const imageStmt = db.prepare('SELECT id, project_id, prompt, image_data, visual_concept_index FROM generated_images WHERE id = ?')
     const originalImage = imageStmt.get(action.image_id) as {
-      id: string; project_id: string; prompt: string; image_data: Buffer | null
+      id: string; project_id: string; prompt: string; image_data: Buffer | null; visual_concept_index: number | null
     } | undefined
 
     if (!originalImage) {
@@ -653,12 +670,13 @@ async function executeImageAction(
     const now = new Date().toISOString()
     const combinedPrompt = `${originalImage.prompt}\n\nRefinements: ${action.refinement_prompt}`
 
+    // Preserve the visual_concept_index from the original image
     const insertStmt = db.prepare(`
-      INSERT INTO generated_images (id, project_id, prompt, image_data, width, height, model, is_upscaled, parent_image_id, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 'nano-banana', 0, ?, ?)
+      INSERT INTO generated_images (id, project_id, prompt, image_data, width, height, model, is_upscaled, parent_image_id, visual_concept_index, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'nano-banana', 0, ?, ?, ?)
     `)
     const imageBuffer = Buffer.from(result.base64Data, 'base64')
-    insertStmt.run(imageId, projectId, combinedPrompt, imageBuffer, result.width, result.height, action.image_id, now)
+    insertStmt.run(imageId, projectId, combinedPrompt, imageBuffer, result.width, result.height, action.image_id, originalImage.visual_concept_index, now)
 
     return {
       id: imageId,
@@ -669,6 +687,47 @@ async function executeImageAction(
       model: 'nano-banana',
       is_upscaled: false,
       parent_image_id: action.image_id,
+      visual_concept_index: originalImage.visual_concept_index ?? undefined,
+      created_at: now,
+    }
+  }
+
+  if (action.type === 'generate_thumbnail') {
+    const referenceImages = action.use_references ? fetchReferenceImages(projectId) : undefined
+    // Convert 1-based thumbnail_index to 0-based visual_concept_index
+    const visualConceptIndex = action.thumbnail_index - 1
+
+    const results = await generateImage({
+      prompt: action.prompt,
+      aspectRatio: (action.aspect_ratio as '1:1' | '16:9' | '9:16' | '4:3') || '1:1',
+      numberOfImages: 1,
+      referenceImages,
+    })
+
+    if (results.length === 0) {
+      throw new Error('Image generation returned no results')
+    }
+
+    const result = results[0]
+    const imageId = generateId()
+    const now = new Date().toISOString()
+
+    const insertStmt = db.prepare(`
+      INSERT INTO generated_images (id, project_id, prompt, image_data, width, height, model, is_upscaled, visual_concept_index, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'nano-banana', 0, ?, ?)
+    `)
+    const imageBuffer = Buffer.from(result.base64Data, 'base64')
+    insertStmt.run(imageId, projectId, action.prompt, imageBuffer, result.width, result.height, visualConceptIndex, now)
+
+    return {
+      id: imageId,
+      project_id: projectId,
+      prompt: action.prompt,
+      width: result.width,
+      height: result.height,
+      model: 'nano-banana',
+      is_upscaled: false,
+      visual_concept_index: visualConceptIndex,
       created_at: now,
     }
   }
@@ -683,22 +742,22 @@ function parseDbOutput(dbOutput: DbOutput): Output {
     project_id: dbOutput.project_id,
     hooks: safeJsonParse(dbOutput.hooks, []),
     hooks_original: [],
-    selected_hook_index: dbOutput.selected_hook_index,
+    selected_hook_index: dbOutput.selected_hook_index ?? -1,
     body_content: dbOutput.body_content,
     body_content_original: '',
-    selected_body_index: dbOutput.selected_body_index,
+    selected_body_index: dbOutput.selected_body_index ?? -1,
     intros: safeJsonParse(dbOutput.intros, []),
     intros_original: [],
-    selected_intro_index: dbOutput.selected_intro_index,
+    selected_intro_index: dbOutput.selected_intro_index ?? -1,
     titles: safeJsonParse(dbOutput.titles, []),
     titles_original: [],
-    selected_title_index: dbOutput.selected_title_index,
+    selected_title_index: dbOutput.selected_title_index ?? -1,
     ctas: safeJsonParse(dbOutput.ctas, []),
     ctas_original: [],
-    selected_cta_index: dbOutput.selected_cta_index,
+    selected_cta_index: dbOutput.selected_cta_index ?? -1,
     visual_concepts: safeJsonParse(dbOutput.visual_concepts, []),
     visual_concepts_original: [],
-    selected_visual_index: dbOutput.selected_visual_index,
+    selected_visual_index: dbOutput.selected_visual_index ?? -1,
     created_at: '',
     updated_at: '',
   }

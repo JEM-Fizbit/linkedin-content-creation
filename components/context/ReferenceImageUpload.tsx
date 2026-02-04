@@ -15,9 +15,13 @@ export function ReferenceImageUpload({ projectId, onImageAdded }: ReferenceImage
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const uploadFile = async (file: File) => {
-    // Validate file type
-    if (!file.type.startsWith('image/')) {
-      setError('Only image files are supported')
+    // Validate file type (check MIME type or extension as fallback)
+    const ext = file.name.split('.').pop()?.toLowerCase()
+    const validExtensions = ['png', 'jpg', 'jpeg', 'webp', 'gif']
+    const isImage = file.type.startsWith('image/') || validExtensions.includes(ext || '')
+
+    if (!isImage) {
+      setError('Only image files are supported (PNG, JPG, WebP, GIF)')
       return
     }
 
@@ -33,6 +37,19 @@ export function ReferenceImageUpload({ projectId, onImageAdded }: ReferenceImage
     try {
       const base64Data = await fileToBase64(file)
 
+      // Infer MIME type from extension if browser didn't detect it
+      let mimeType = file.type
+      if (!mimeType || !mimeType.startsWith('image/')) {
+        const extToMime: Record<string, string> = {
+          png: 'image/png',
+          jpg: 'image/jpeg',
+          jpeg: 'image/jpeg',
+          webp: 'image/webp',
+          gif: 'image/gif',
+        }
+        mimeType = extToMime[ext || ''] || 'image/png'
+      }
+
       const response = await fetch('/api/assets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -40,7 +57,7 @@ export function ReferenceImageUpload({ projectId, onImageAdded }: ReferenceImage
           project_id: projectId,
           type: 'reference_image',
           filename: file.name,
-          mime_type: file.type,
+          mime_type: mimeType,
           data: base64Data,
         }),
       })
@@ -113,7 +130,7 @@ export function ReferenceImageUpload({ projectId, onImageAdded }: ReferenceImage
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/png,image/jpeg,image/jpg,image/webp"
+        accept="image/png,image/jpeg,image/jpg,image/webp,image/gif,.png,.jpg,.jpeg,.webp,.gif"
         multiple
         onChange={handleFileSelect}
         className="hidden"

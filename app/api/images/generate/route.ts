@@ -8,7 +8,7 @@ import type { GeneratedImage, GenerateImageRequest } from '@/types'
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json() as GenerateImageRequest
-    const { project_id, prompt, width = 1024, height = 1024 } = body
+    const { project_id, prompt, width = 1024, height = 1024, visual_concept_index } = body
 
     if (!project_id) {
       return NextResponse.json(
@@ -94,13 +94,13 @@ export async function POST(request: NextRequest) {
     const now = new Date().toISOString()
 
     const insertStmt = db.prepare(`
-      INSERT INTO generated_images (id, project_id, prompt, image_data, width, height, model, is_upscaled, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 'nano-banana', 0, ?)
+      INSERT INTO generated_images (id, project_id, prompt, image_data, width, height, model, is_upscaled, visual_concept_index, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'nano-banana', 0, ?, ?)
     `)
 
     // Convert base64 to Buffer for storage
     const imageBuffer = Buffer.from(result.base64Data, 'base64')
-    insertStmt.run(imageId, project_id, prompt, imageBuffer, result.width, result.height, now)
+    insertStmt.run(imageId, project_id, prompt, imageBuffer, result.width, result.height, visual_concept_index ?? null, now)
 
     const generatedImage: GeneratedImage = {
       id: imageId,
@@ -111,6 +111,7 @@ export async function POST(request: NextRequest) {
       height: result.height,
       model: 'nano-banana',
       is_upscaled: false,
+      visual_concept_index,
       created_at: now,
     }
 
@@ -157,7 +158,7 @@ export async function GET(request: NextRequest) {
     }
 
     const stmt = db.prepare(`
-      SELECT id, project_id, prompt, width, height, model, is_upscaled, parent_image_id, created_at
+      SELECT id, project_id, prompt, width, height, model, is_upscaled, parent_image_id, visual_concept_index, created_at
       FROM generated_images
       WHERE project_id = ?
       ORDER BY created_at DESC

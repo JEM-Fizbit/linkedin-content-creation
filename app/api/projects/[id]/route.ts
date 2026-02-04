@@ -44,23 +44,37 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     let output: Output | null = null
     if (outputRow) {
       output = {
-        ...outputRow,
+        id: outputRow.id,
+        session_id: outputRow.session_id,
+        project_id: outputRow.project_id,
         hooks: safeJsonParse(outputRow.hooks, []),
         hooks_original: safeJsonParse(outputRow.hooks_original, []),
-        ctas: safeJsonParse(outputRow.ctas, []),
-        ctas_original: safeJsonParse(outputRow.ctas_original, []),
-        visual_concepts: safeJsonParse(outputRow.visual_concepts, []),
-        visual_concepts_original: safeJsonParse(outputRow.visual_concepts_original, []),
+        selected_hook_index: outputRow.selected_hook_index ?? -1,
+        body_content: outputRow.body_content || '',
+        body_content_original: outputRow.body_content_original || '',
+        selected_body_index: outputRow.selected_body_index ?? -1,
         intros: safeJsonParse(outputRow.intros, []),
         intros_original: safeJsonParse(outputRow.intros_original, []),
+        selected_intro_index: outputRow.selected_intro_index ?? -1,
         titles: safeJsonParse(outputRow.titles, []),
         titles_original: safeJsonParse(outputRow.titles_original, []),
+        selected_title_index: outputRow.selected_title_index ?? -1,
+        ctas: safeJsonParse(outputRow.ctas, []),
+        ctas_original: safeJsonParse(outputRow.ctas_original, []),
+        selected_cta_index: outputRow.selected_cta_index ?? -1,
+        visual_concepts: safeJsonParse(outputRow.visual_concepts, []),
+        visual_concepts_original: safeJsonParse(outputRow.visual_concepts_original, []),
+        selected_visual_index: outputRow.selected_visual_index ?? -1,
+        research_context: outputRow.research_context ? safeJsonParse(outputRow.research_context as unknown as string, undefined) : undefined,
+        citations: safeJsonParse(outputRow.citations as unknown as string, []),
+        created_at: outputRow.created_at,
+        updated_at: outputRow.updated_at,
       }
     }
 
     // Get generated images (including image data for display)
     const imagesStmt = db.prepare(`
-      SELECT id, project_id, prompt, image_data, image_url, width, height, model, is_upscaled, parent_image_id, created_at
+      SELECT id, project_id, prompt, image_data, image_url, width, height, model, is_upscaled, parent_image_id, visual_concept_index, created_at
       FROM generated_images
       WHERE project_id = ?
       ORDER BY created_at DESC
@@ -76,6 +90,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       model: string
       is_upscaled: number
       parent_image_id: string | null
+      visual_concept_index: number | null
       created_at: string
     }>
 
@@ -91,6 +106,7 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       model: img.model,
       is_upscaled: img.is_upscaled === 1,
       parent_image_id: img.parent_image_id,
+      visual_concept_index: img.visual_concept_index ?? undefined,
       created_at: img.created_at,
     }))
 
@@ -187,7 +203,7 @@ export async function PATCH(request: NextRequest, { params }: RouteParams) {
     }
 
     if (body.current_step !== undefined) {
-      const validSteps = ['hooks', 'body', 'intros', 'titles', 'ctas', 'visuals', 'thumbnails', 'carousel', 'complete']
+      const validSteps = ['setup', 'hooks', 'body', 'intros', 'titles', 'ctas', 'visuals', 'thumbnails', 'carousel', 'complete']
       if (!validSteps.includes(body.current_step)) {
         return NextResponse.json(
           { error: 'Invalid current_step' },

@@ -25,7 +25,7 @@ db.exec(`
     content_style TEXT NOT NULL DEFAULT '',
     platform TEXT NOT NULL DEFAULT 'linkedin' CHECK (platform IN ('linkedin', 'youtube', 'facebook')),
     status TEXT NOT NULL DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'complete', 'published')),
-    current_step TEXT NOT NULL DEFAULT 'hooks' CHECK (current_step IN ('hooks', 'body', 'intros', 'titles', 'ctas', 'visuals', 'thumbnails', 'carousel', 'complete')),
+    current_step TEXT NOT NULL DEFAULT 'setup' CHECK (current_step IN ('setup', 'hooks', 'body', 'intros', 'titles', 'ctas', 'visuals', 'thumbnails', 'carousel', 'complete')),
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     published_at DATETIME,
@@ -283,6 +283,25 @@ addColumnIfNotExists('content_versions', 'project_id', 'TEXT REFERENCES projects
 // Outputs table migrations for research
 addColumnIfNotExists('outputs', 'research_context', 'TEXT')
 addColumnIfNotExists('outputs', 'citations', "TEXT NOT NULL DEFAULT '[]'")
+
+// Generated images table migrations (for thumbnail-to-visual-concept linkage)
+addColumnIfNotExists('generated_images', 'visual_concept_index', 'INTEGER')
+
+// Add index for visual_concept_index queries
+try {
+  db.exec('CREATE INDEX IF NOT EXISTS idx_generated_images_visual_concept ON generated_images(project_id, visual_concept_index)')
+} catch {
+  // Index might already exist
+}
+
+// REMOVED: The old migration that converted 0s to -1s was running on every server restart,
+// which undid valid selections (0 is a valid selection meaning "first card selected").
+// New records are now inserted with -1 in outputs/route.ts, so this migration is no longer needed.
+// NOTE: 0 means "first card selected", -1 means "no selection", -2 means "explicitly skipped"
+
+// Migration: Add 'setup' to projects.current_step CHECK constraint
+// This was run manually on existing database - this code is kept for documentation
+// The schema definition above now includes 'setup' for new databases
 
 // Migration: Update projects table CHECK constraint to include 'carousel'
 // IMPORTANT: This migration is now a no-op since the schema already includes 'carousel'

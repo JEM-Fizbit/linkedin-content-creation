@@ -23,6 +23,7 @@ const PLATFORM_GENERATION_PROMPTS: Record<Platform, string> = {
 - 5 attention-grabbing hooks (opening lines)
 - Body content (150-300 words)
 - 3 call-to-action options
+- 5 title options (concise, engaging titles that could be used as the post headline or article title)
 - 3 visual concept descriptions for accompanying images`,
 
   youtube: `Generate content for a YouTube video. Include:
@@ -35,6 +36,7 @@ const PLATFORM_GENERATION_PROMPTS: Record<Platform, string> = {
 - 5 attention-grabbing hooks (opening lines)
 - Body content (100-250 words)
 - 3 call-to-action options
+- 5 title options (concise, engaging titles that could be used as the post headline)
 - 3 visual concept descriptions for accompanying images`,
 }
 
@@ -198,10 +200,12 @@ export async function POST(request: NextRequest) {
             id, project_id, hooks, hooks_original, body_content, body_content_original,
             intros, intros_original, titles, titles_original,
             ctas, ctas_original, visual_concepts, visual_concepts_original,
+            selected_hook_index, selected_body_index, selected_intro_index,
+            selected_title_index, selected_cta_index, selected_visual_index,
             research_context, citations,
             created_at, updated_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
         insertStmt.run(
           outputId,
@@ -218,6 +222,12 @@ export async function POST(request: NextRequest) {
           JSON.stringify(generatedContent.ctas),
           JSON.stringify(generatedContent.visual_concepts),
           JSON.stringify(generatedContent.visual_concepts),
+          -1, // selected_hook_index
+          -1, // selected_body_index
+          -1, // selected_intro_index
+          -1, // selected_title_index
+          -1, // selected_cta_index
+          -1, // selected_visual_index
           generatedContent.researchContext ? JSON.stringify(generatedContent.researchContext) : null,
           JSON.stringify(generatedContent.citations || []),
           now,
@@ -229,10 +239,12 @@ export async function POST(request: NextRequest) {
             id, session_id, hooks, hooks_original, body_content, body_content_original,
             intros, intros_original, titles, titles_original,
             ctas, ctas_original, visual_concepts, visual_concepts_original,
+            selected_hook_index, selected_body_index, selected_intro_index,
+            selected_title_index, selected_cta_index, selected_visual_index,
             research_context, citations,
             created_at, updated_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `)
         insertStmt.run(
           outputId,
@@ -249,6 +261,12 @@ export async function POST(request: NextRequest) {
           JSON.stringify(generatedContent.ctas),
           JSON.stringify(generatedContent.visual_concepts),
           JSON.stringify(generatedContent.visual_concepts),
+          -1, // selected_hook_index
+          -1, // selected_body_index
+          -1, // selected_intro_index
+          -1, // selected_title_index
+          -1, // selected_cta_index
+          -1, // selected_visual_index
           generatedContent.researchContext ? JSON.stringify(generatedContent.researchContext) : null,
           JSON.stringify(generatedContent.citations || []),
           now,
@@ -262,22 +280,22 @@ export async function POST(request: NextRequest) {
         project_id: project_id || undefined,
         hooks: generatedContent.hooks,
         hooks_original: generatedContent.hooks,
-        selected_hook_index: 0,
+        selected_hook_index: -1,
         body_content: generatedContent.body_content,
         body_content_original: generatedContent.body_content,
-        selected_body_index: 0,
+        selected_body_index: -1,
         intros: generatedContent.intros,
         intros_original: generatedContent.intros,
-        selected_intro_index: 0,
+        selected_intro_index: -1,
         titles: generatedContent.titles,
         titles_original: generatedContent.titles,
-        selected_title_index: 0,
+        selected_title_index: -1,
         ctas: generatedContent.ctas,
         ctas_original: generatedContent.ctas,
-        selected_cta_index: 0,
+        selected_cta_index: -1,
         visual_concepts: generatedContent.visual_concepts,
         visual_concepts_original: generatedContent.visual_concepts,
-        selected_visual_index: 0,
+        selected_visual_index: -1,
         research_context: generatedContent.researchContext,
         citations: generatedContent.citations,
         created_at: now,
@@ -303,22 +321,22 @@ function parseOutputRow(row: Record<string, unknown>): Output {
     project_id: row.project_id as string | undefined,
     hooks: safeJsonParse(row.hooks as string, []),
     hooks_original: safeJsonParse(row.hooks_original as string, []),
-    selected_hook_index: row.selected_hook_index as number || 0,
+    selected_hook_index: (row.selected_hook_index as number) ?? -1,
     body_content: row.body_content as string || '',
     body_content_original: row.body_content_original as string || '',
-    selected_body_index: row.selected_body_index as number || 0,
+    selected_body_index: (row.selected_body_index as number) ?? -1,
     intros: safeJsonParse(row.intros as string, []),
     intros_original: safeJsonParse(row.intros_original as string, []),
-    selected_intro_index: row.selected_intro_index as number || 0,
+    selected_intro_index: (row.selected_intro_index as number) ?? -1,
     titles: safeJsonParse(row.titles as string, []),
     titles_original: safeJsonParse(row.titles_original as string, []),
-    selected_title_index: row.selected_title_index as number || 0,
+    selected_title_index: (row.selected_title_index as number) ?? -1,
     ctas: safeJsonParse(row.ctas as string, []),
     ctas_original: safeJsonParse(row.ctas_original as string, []),
-    selected_cta_index: row.selected_cta_index as number || 0,
+    selected_cta_index: (row.selected_cta_index as number) ?? -1,
     visual_concepts: safeJsonParse(row.visual_concepts as string, []),
     visual_concepts_original: safeJsonParse(row.visual_concepts_original as string, []),
-    selected_visual_index: row.selected_visual_index as number || 0,
+    selected_visual_index: (row.selected_visual_index as number) ?? -1,
     research_context: row.research_context ? safeJsonParse(row.research_context as string, undefined) : undefined,
     citations: safeJsonParse(row.citations as string, []),
     created_at: row.created_at as string,
@@ -459,7 +477,7 @@ Return your response as a JSON object with this structure:
   "visual_concepts": [{"description": "visual concept 1"}, ...]
 }
 
-For ${contextInfo.platform === 'youtube' ? 'YouTube content, focus on intros, titles, and visual_concepts (thumbnails). body_content can be a brief description.' : 'LinkedIn/Facebook content, focus on hooks, body_content, ctas, and visual_concepts. intros and titles can be empty arrays.'}`
+For ${contextInfo.platform === 'youtube' ? 'YouTube content, focus on intros, titles, and visual_concepts (thumbnails). body_content can be a brief description. intros should NOT be empty.' : 'LinkedIn/Facebook content, focus on hooks, body_content, titles, ctas, and visual_concepts. intros can be empty array but titles should contain 5 options.'}`
 
   const response = await anthropic.messages.create({
     model: 'claude-sonnet-4-20250514',
@@ -543,7 +561,13 @@ function getDefaultContent(platform: Platform, fallbackText: string): GeneratedC
     ],
     body_content: fallbackText || 'Content generation failed. Please try again.',
     intros: [],
-    titles: [],
+    titles: [
+      'The Insight That Changed Everything',
+      'Why Most People Get This Wrong',
+      'A Fresh Perspective on What Matters',
+      'The Surprising Truth About Success',
+      'What I Wish I Knew Sooner'
+    ],
     ctas: [
       'What\'s your take on this? Share in the comments below.',
       'If this resonated, follow me for more insights.',

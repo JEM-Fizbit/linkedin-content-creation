@@ -105,6 +105,25 @@ export function ContextPanel({ projectId }: ContextPanelProps) {
     }
   }
 
+  const handleChangeProvider = async (provider: 'claude' | 'perplexity') => {
+    setIsUpdatingSearch(true)
+    try {
+      const response = await fetch(`/api/projects/${projectId}/search-settings`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ search_provider: provider }),
+      })
+      if (response.ok) {
+        const data = await response.json()
+        setSearchSettings(data)
+      }
+    } catch (err) {
+      console.error('Failed to update search provider:', err)
+    } finally {
+      setIsUpdatingSearch(false)
+    }
+  }
+
   useEffect(() => {
     fetchSources()
     fetchAssets()
@@ -294,9 +313,39 @@ export function ContextPanel({ projectId }: ContextPanelProps) {
                 </button>
               </div>
               {searchSettings.web_search_enabled && (
-                <p className="text-xs text-amber-600 dark:text-amber-400 mt-2 ml-6">
-                  Note: Web research may add 30-60 seconds to generation time
-                </p>
+                <div className="mt-3 ml-6 space-y-2">
+                  {/* Provider selector */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-gray-500 dark:text-gray-400">Provider:</span>
+                    <div className="flex rounded-lg overflow-hidden border border-gray-200 dark:border-gray-600">
+                      <button
+                        onClick={() => handleChangeProvider('claude')}
+                        disabled={isUpdatingSearch}
+                        className={`px-3 py-1 text-xs font-medium transition-colors ${
+                          searchSettings.search_provider === 'claude'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
+                        }`}
+                      >
+                        Claude
+                      </button>
+                      <button
+                        onClick={() => handleChangeProvider('perplexity')}
+                        disabled={isUpdatingSearch}
+                        className={`px-3 py-1 text-xs font-medium transition-colors border-l border-gray-200 dark:border-gray-600 ${
+                          searchSettings.search_provider === 'perplexity'
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'
+                        }`}
+                      >
+                        Perplexity
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    Note: Web research may add 30-60 seconds to generation time
+                  </p>
+                </div>
               )}
             </div>
           </div>

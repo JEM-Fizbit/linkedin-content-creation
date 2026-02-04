@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { X, Sparkles, Loader2 } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { X, Sparkles, Loader2, RefreshCw, Pencil } from 'lucide-react'
 import Image from 'next/image'
 
 interface RefineImageModalProps {
@@ -13,6 +13,7 @@ interface RefineImageModalProps {
     prompt: string
   }
   onRefine: (refinementPrompt: string) => Promise<void>
+  onRegenerate?: (newPrompt: string) => Promise<void>
 }
 
 export function RefineImageModal({
@@ -20,26 +21,61 @@ export function RefineImageModal({
   onClose,
   currentImage,
   onRefine,
+  onRegenerate,
 }: RefineImageModalProps) {
   const [refinementPrompt, setRefinementPrompt] = useState('')
+  const [editedPrompt, setEditedPrompt] = useState(currentImage.prompt)
+  const [isPromptEdited, setIsPromptEdited] = useState(false)
   const [isRefining, setIsRefining] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const handleRefine = async () => {
-    if (!refinementPrompt.trim()) return
+  // Reset edited prompt when modal opens with new image
+  useEffect(() => {
+    setEditedPrompt(currentImage.prompt)
+    setIsPromptEdited(false)
+  }, [currentImage.prompt])
 
-    setIsRefining(true)
-    setError(null)
-    try {
-      await onRefine(refinementPrompt.trim())
-      setRefinementPrompt('')
-      onClose()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to refine image')
-    } finally {
-      setIsRefining(false)
+  const handlePromptChange = (value: string) => {
+    setEditedPrompt(value)
+    setIsPromptEdited(value !== currentImage.prompt)
+  }
+
+  const handleSubmit = async () => {
+    // If prompt was edited and we have onRegenerate, regenerate from new prompt
+    if (isPromptEdited && onRegenerate) {
+      if (!editedPrompt.trim()) return
+
+      setIsRefining(true)
+      setError(null)
+      try {
+        await onRegenerate(editedPrompt.trim())
+        setRefinementPrompt('')
+        onClose()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to regenerate image')
+      } finally {
+        setIsRefining(false)
+      }
+    } else {
+      // Otherwise, refine with the refinement prompt
+      if (!refinementPrompt.trim()) return
+
+      setIsRefining(true)
+      setError(null)
+      try {
+        await onRefine(refinementPrompt.trim())
+        setRefinementPrompt('')
+        onClose()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to refine image')
+      } finally {
+        setIsRefining(false)
+      }
     }
   }
+
+  // Determine if submit button should be enabled
+  const canSubmit = isPromptEdited ? editedPrompt.trim().length > 0 : refinementPrompt.trim().length > 0
 
   const suggestions = [
     'Change the text to say "NEW VIDEO"',
@@ -90,44 +126,73 @@ export function RefineImageModal({
             />
           </div>
 
-          {/* Original Prompt */}
+          {/* Image Prompt (Editable) */}
           <div>
-            <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Original Prompt</div>
-            <p className="text-sm text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-gray-900 p-3 rounded-lg">
-              {currentImage.prompt}
-            </p>
-          </div>
-
-          {/* Refinement Input */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              What would you like to change?
-            </label>
-            <textarea
-              value={refinementPrompt}
-              onChange={(e) => setRefinementPrompt(e.target.value)}
-              placeholder="e.g., Make the text bigger, change colors, adjust composition..."
-              className="w-full p-4 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
-              rows={3}
-              autoFocus
-            />
-          </div>
-
-          {/* Quick Suggestions */}
-          <div>
-            <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-2">Quick suggestions</div>
-            <div className="flex flex-wrap gap-2">
-              {suggestions.map((suggestion, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => setRefinementPrompt(suggestion)}
-                  className="px-3 py-1.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full hover:bg-purple-100 dark:hover:bg-purple-900/30 hover:text-purple-700 dark:hover:text-purple-300 transition-colors"
-                >
-                  {suggestion}
-                </button>
-              ))}
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-gray-500 dark:text-gray-400 uppercase">Image Prompt</span>
+                <Pencil className="w-3 h-3 text-gray-400" />
+              </div>
+              {isPromptEdited && (
+                <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+                  Modified - will regenerate from scratch
+                </span>
+              )}
             </div>
+            <textarea
+              value={editedPrompt}
+              onChange={(e) => handlePromptChange(e.target.value)}
+              className={`w-full p-3 text-sm border rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white resize-none focus:ring-2 focus:ring-purple-500 focus:border-transparent transition-colors ${
+                isPromptEdited
+                  ? 'border-amber-400 dark:border-amber-500'
+                  : 'border-gray-300 dark:border-gray-600'
+              }`}
+              rows={3}
+            />
+            {isPromptEdited && (
+              <button
+                onClick={() => handlePromptChange(currentImage.prompt)}
+                className="mt-1 text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              >
+                Reset to original
+              </button>
+            )}
           </div>
+
+          {/* Refinement Input - only show if prompt not edited */}
+          {!isPromptEdited && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Or describe changes to make
+              </label>
+              <textarea
+                value={refinementPrompt}
+                onChange={(e) => setRefinementPrompt(e.target.value)}
+                placeholder="e.g., Make the text bigger, change colors, adjust composition..."
+                className="w-full p-4 border border-gray-300 dark:border-gray-600 rounded-xl bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 focus:ring-2 focus:ring-purple-500 focus:border-transparent resize-none"
+                rows={3}
+                autoFocus
+              />
+            </div>
+          )}
+
+          {/* Quick Suggestions - only show if in refine mode */}
+          {!isPromptEdited && (
+            <div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-2">Quick suggestions</div>
+              <div className="flex flex-wrap gap-2">
+                {suggestions.map((suggestion, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => setRefinementPrompt(suggestion)}
+                    className="px-3 py-1.5 text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full hover:bg-purple-100 dark:hover:bg-purple-900/30 hover:text-purple-700 dark:hover:text-purple-300 transition-colors"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {error && (
             <div className="p-3 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-lg text-sm">
@@ -145,14 +210,23 @@ export function RefineImageModal({
             Cancel
           </button>
           <button
-            onClick={handleRefine}
-            disabled={!refinementPrompt.trim() || isRefining}
-            className="px-6 py-2.5 bg-purple-600 text-white font-medium rounded-lg hover:bg-purple-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            onClick={handleSubmit}
+            disabled={!canSubmit || isRefining}
+            className={`px-6 py-2.5 text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 ${
+              isPromptEdited
+                ? 'bg-amber-600 hover:bg-amber-700'
+                : 'bg-purple-600 hover:bg-purple-700'
+            }`}
           >
             {isRefining ? (
               <>
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Refining...
+                {isPromptEdited ? 'Regenerating...' : 'Refining...'}
+              </>
+            ) : isPromptEdited ? (
+              <>
+                <RefreshCw className="w-4 h-4" />
+                Regenerate Image
               </>
             ) : (
               <>
