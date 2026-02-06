@@ -18,7 +18,7 @@ git config user.email "johnemilad@hotmail.com"
 
 ## Synced Protocols (via knowhub)
 
-Files in `docs/protocols/` are synced from the central [ai-knowledge](https://github.com/JEM-Fizbit/ai-knowledge) repo and **will be overwritten on commit**. To update a protocol: edit in `~/dev/ai-knowledge/protocols/`, push, then run `knowhub` here.
+Files in `docs/protocols/` are synced from the central [ai-knowledge](https://github.com/JEM-Fizbit/ai-knowledge) repo and **will be overwritten on commit**. To update a protocol: edit in `~/Projects/ai-knowledge/protocols/`, push, then run `knowhub` here.
 
 **Protocols synced to this project:**
 - `GEMINI_IMAGE_GENERATION.md` - Google Gemini image generation
