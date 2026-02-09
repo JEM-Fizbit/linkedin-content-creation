@@ -30,7 +30,7 @@ Files in `docs/protocols/` are synced from the central [ai-knowledge](https://gi
 
 | Component | Technology |
 |-----------|------------|
-| Frontend | Next.js 14 (App Router) + TypeScript |
+| Frontend | Next.js 16 (App Router) + React 19 + TypeScript |
 | UI | Tailwind CSS + Lucide Icons |
 | Backend | Next.js API Routes |
 | Database | SQLite (better-sqlite3) |
@@ -50,7 +50,7 @@ npm run build        # Production build
 npm run start        # Start production server
 
 # Lint
-npm run lint         # Run ESLint
+npm run lint         # Run ESLint (eslint ., not next lint — removed in Next 16)
 ```
 
 ---
